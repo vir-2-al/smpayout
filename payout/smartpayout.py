@@ -1,21 +1,29 @@
+import os
+import time
 import inspect
 import logging
 import queue
 import threading
-import time
-import typing
-from typing import Union, Callable, NoReturn, Tuple, Dict
-import os
 import pickle
-# import json
-import receipt_module
+import serial
 
+from datetime import datetime, timedelta
+from sys import builtin_module_names
+from random import randint
+from typing import Union, Callable, NoReturn, Tuple, Dict, Any
+
+from cfg import APP_NAME
 from payout import aes128
-import cfg
-import appconf
-from payout.smartpayout_def import *
-from inc.utils import *
-from payout.smartpayout_def import SSPResponse, SSP_DEFAULT_CURRENCY
+from inc.utils import get_serial_ports, crc_ccitt_16, flatlist, thread_sleep
+from payout.smartpayout_def import (
+    itl_dev_port, itl_payment_state_file, itl_device_state_file,
+    SSPResponse, SSP_DEFAULT_CURRENCY, SSP_SCALE_FACTOR, SSPKeys, SSPState, SSP_MAX_PROTOCOL_VERSION, 
+    SSP_CRC_SEED, SSP_CRC_POLY, SSP_STEX, SSP_STX, SSP_DEFAULT_CHANNEL_VALUES, SSP_MAX_PAYOUT_CAPACITY,
+    SSP_FLOAT_TIMEOUT, SSP_FLOAT_AMOUNT, SSP_LIMIT_PAYOUT_CAPACITY, SSP_MAX_CASHBOX_CAPACITY, 
+    SSP_LIMIT_CASHBOX_CAPACITY, SSP_DEFAULT_KEY, MAX_PRIME_NUMBER,
+    DeviceState, PaymentState, PollEvents, PaymentMode, ReportType, PageType, ReportTypeTitle, PayoutCmd,
+    RouteModes, SSPRejectReason, EncryptedCmd, GenericCmd, BNVCmd, PayoutNotInitializedError, PaymentCallbackEvents,
+    generate_prime, xpow_ymod_n)
 
 
 class SmartPayout(threading.Thread):
@@ -30,7 +38,7 @@ class SmartPayout(threading.Thread):
                  event_callback: Callable = None) -> None:
 
         super().__init__()
-        logger = logging.getLogger(cfg.APP_NAME + __name__ + '.' + inspect.stack()[0][3])
+        logger = logging.getLogger(APP_NAME + __name__ + '.' + inspect.stack()[0][3])
 
         if serial_port:
             port_name = os.path.basename(serial_port)
@@ -66,7 +74,15 @@ class SmartPayout(threading.Thread):
         self._payment = PaymentState()
 
         self._disabled_other_payment = False
+        self._receipt_no = 0
         return
+
+    def get_receipt_number(self) -> int:
+        """
+        Получает следующий номер чека/отчета
+        """
+        self._receipt_no += 1
+        return self._receipt_no
 
     def is_device_connected(self) -> bool:
         # self._seq = 0x00
@@ -85,7 +101,7 @@ class SmartPayout(threading.Thread):
 
     def device_out_of_service(self):
         if SSPState.error_page not in self._state:
-            logger = logging.getLogger(cfg.APP_NAME + __name__ + '.' + inspect.stack()[0][3])
+            logger = logging.getLogger(APP_NAME + __name__ + '.' + inspect.stack()[0][3])
             logger.error('SmartPayout.device_out_of_service')
             try:
                 self._state.add(SSPState.error_page)
@@ -96,7 +112,7 @@ class SmartPayout(threading.Thread):
 
     def device_in_service(self):
         if SSPState.error_page in self._state:
-            logger = logging.getLogger(cfg.APP_NAME + __name__ + '.' + inspect.stack()[0][3])
+            logger = logging.getLogger(APP_NAME + __name__ + '.' + inspect.stack()[0][3])
             logger.info('SmartPayout.device_in_service')
             try:
                 if self._state and self._on_event_callback:
@@ -107,7 +123,7 @@ class SmartPayout(threading.Thread):
                 logger.error(f'SmartPayout.device_in_service: error: {se}')
 
     def close_device(self) -> None:
-        logger = logging.getLogger(cfg.APP_NAME + __name__ + '.' + inspect.stack()[0][3])
+        logger = logging.getLogger(APP_NAME + __name__ + '.' + inspect.stack()[0][3])
         # logger.info('SmartPayout.close_device')
         # with self._locker:
         if self._device_port:
@@ -122,9 +138,9 @@ class SmartPayout(threading.Thread):
             except (FileNotFoundError, OSError, serial.SerialException) as se:
                 logger.error(f'SmartPayout.close_device: Except: {se}')
             finally:
-                logger.info('SmartPayout.close_device: port closed..')
+                logger.info('SmartPayout.close_device: port closed.')
         # else:
-        #     logger.error('SmartPayout.close_device: port not open on de_init..')
+        #     logger.error('SmartPayout.close_device: port not open on de_init.')
         self.encrypted = False
         self._state.add(SSPState.disconnected)
         self._device_port = None
@@ -134,7 +150,7 @@ class SmartPayout(threading.Thread):
         self.close_device()
 
     def find_device(self) -> bool:
-        logger = logging.getLogger(cfg.APP_NAME + __name__ + '.' + inspect.stack()[0][3])
+        logger = logging.getLogger(APP_NAME + __name__ + '.' + inspect.stack()[0][3])
         logger.info('SmartPayout.find_device: try find device')
         list_port = get_serial_ports()
         for port in list_port:
@@ -160,7 +176,7 @@ class SmartPayout(threading.Thread):
         return False
 
     def init_device(self) -> bool:
-        logger = logging.getLogger(cfg.APP_NAME + __name__ + '.' + inspect.stack()[0][3])
+        logger = logging.getLogger(APP_NAME + __name__ + '.' + inspect.stack()[0][3])
         logger.info('SmartPayout.device_init: initializing ...')
 
         # Negotiate keys for encryption
@@ -206,7 +222,7 @@ class SmartPayout(threading.Thread):
         return True
 
     def open_device(self) -> bool:
-        logger = logging.getLogger(cfg.APP_NAME + __name__ + '.' + inspect.stack()[0][3])
+        logger = logging.getLogger(APP_NAME + __name__ + '.' + inspect.stack()[0][3])
         logger.info(f'SmartPayout.open_device: try open device [{self._serial_port}]')
         if self._device_port:
             self.close_device()
@@ -277,7 +293,7 @@ class SmartPayout(threading.Thread):
 
     def decrypt_packet(self, data: bytes) -> Any:
 
-        # check for encrypted packet
+        # check for an encrypted packet
         key = bytes(self._keys.FixedKey.to_bytes(8, byteorder='little') +
                     self._keys.EncryptKey.to_bytes(8, byteorder='little'))
         max_block_len = 16  # 128 bit for AES128
@@ -312,7 +328,7 @@ class SmartPayout(threading.Thread):
         return ans_code, res_data
 
     def check_response(self) -> Tuple[SSPResponse, Union[Union[int, bytes], Any]]:
-        logger = logging.getLogger(cfg.APP_NAME + __name__ + '.' + inspect.stack()[0][3])
+        logger = logging.getLogger(APP_NAME + __name__ + '.' + inspect.stack()[0][3])
         try:
             read_header = self._device_port.read(size=3)
             if not isinstance(read_header, bytes) or len(read_header) < 3:
@@ -353,10 +369,10 @@ class SmartPayout(threading.Thread):
             return SSPResponse.timeout, None
 
     def exec_command(self, data: Any) -> Tuple[SSPResponse, Union[Union[int, bytes], Any]]:
-        # logger = logging.getLogger(cfg.APP_NAME + __name__ + '.' + inspect.stack()[0][3])
+        # logger = logging.getLogger(APP_NAME + __name__ + '.' + inspect.stack()[0][3])
         # logger.info(f'SmartPayout.exec_command: data: {data}')
         with (self._serial_locker):
-            logger = logging.getLogger(cfg.APP_NAME + __name__ + '.' + inspect.stack()[0][3])
+            logger = logging.getLogger(APP_NAME + __name__ + '.' + inspect.stack()[0][3])
             if self._device_port:
                 data = flatlist(data)
                 byte_list = [[ord(x) for x in i] if isinstance(i, str) else [i] for i in data]
@@ -431,12 +447,13 @@ class SmartPayout(threading.Thread):
         for k, v in SSP_DEFAULT_CHANNEL_VALUES.items():
             if v == amount:
                 return k
+        return 0
 
     def poll_device(self) -> bool:
         if not self._device_port or not self.encrypted:
             return False
 
-        logger = logging.getLogger(cfg.APP_NAME + __name__ + '.' + inspect.stack()[0][3])
+        logger = logging.getLogger(APP_NAME + __name__ + '.' + inspect.stack()[0][3])
         res, data = self.sspPoll()
         if res != SSPResponse.ok:
             return False
@@ -482,10 +499,10 @@ class SmartPayout(threading.Thread):
 
             # note_credit = 0xEE
             # A note has passed through the device, past the point of possible
-            # recovery and the host can safely issue its credit amount.
+            #  recovery, and the host can safely issue its credit amount.
             if event_code == PollEvents.note_credit:
                 channel = data[idx + 1]
-                self._payment.last_banknote_time = datetime.datetime.now()
+                self._payment.last_banknote_time = datetime.now()
                 if channel < len(self._device.channels):
                     logger.info(
                         f'SmartPayout.poll: credit banknote {self._device.channels[channel].nominal} {self._device.channels[channel].currency}')
@@ -520,7 +537,7 @@ class SmartPayout(threading.Thread):
             # section of the device.
             if event_code == PollEvents.note_stacking:
                 logger.info('SmartPayout.poll: stacking note...')
-                self._payment.last_banknote_time = datetime.datetime.now()
+                self._payment.last_banknote_time = datetime.now()
                 idx += 1
                 continue
 
@@ -529,7 +546,7 @@ class SmartPayout(threading.Thread):
             # within its note stacker.
             if event_code == PollEvents.note_stacked:
                 logger.info('SmartPayout.poll: note stacked')
-                self._payment.last_banknote_time = datetime.datetime.now()
+                self._payment.last_banknote_time = datetime.now()
                 channel_no = self.get_channel_no(self._payment.last_banknote_amount)
                 if channel_no:
                     self._device.channels[channel_no].cashbox.count += 1
@@ -594,7 +611,7 @@ class SmartPayout(threading.Thread):
                 idx += 2
                 continue
 
-            # note_cleared_to_cashbox = 0xE2
+            # Note_cleared_to_cashbox = 0xE2
             # At power up, a note was detected as being moved into the stacker
             # unit or host exit of the device. The channel number of the note is
             # given in the data byte if known.
@@ -669,7 +686,7 @@ class SmartPayout(threading.Thread):
                 idx += 1
                 continue
 
-            # dispensing = 0xDA
+            # Dispensing = 0xDA
             # The device is in the process of paying out a requested value. The
             # value paid at the poll is given in the vent data.
             if event_code == PollEvents.dispensing:
@@ -680,11 +697,11 @@ class SmartPayout(threading.Thread):
                 self._payment.last_note_dispensing = amount
 
                 self._payment.last_banknote_amount = amount
-                self._payment.last_banknote_time = datetime.datetime.now()
+                self._payment.last_banknote_time = datetime.now()
                 logger.info(f'Dispensing. {amount} {currency}')
                 continue
 
-            # dispensed = 0xD2
+            # Dispensed = 0xD2
             # The device has completed its pay-out request. The final value paid is
             # given in the event data.
             if event_code == PollEvents.dispensed:
@@ -693,7 +710,7 @@ class SmartPayout(threading.Thread):
                 idx += num_bytes + 1
 
                 # self._payment.last_banknote_amount = amount
-                # self._payment.last_banknote_time = datetime.datetime.now()
+                # self._payment.last_banknote_time = datetime.now()
                 # channel_no = self.get_channel_no(amount)
                 # if channel_no:
                 #     if self._device.channels[channel_no].payout.count > 0:
@@ -720,7 +737,7 @@ class SmartPayout(threading.Thread):
                 idx += 1
                 continue
 
-            # jammed = 0xD5
+            # Jammed = 0xD5
             # The device has detected that coins are jammed in its mechanism
             # and cannot be removed other than by manual intervention. The
             # value paid at the jam point is given in the event data.
@@ -731,7 +748,7 @@ class SmartPayout(threading.Thread):
                 self.device_out_of_service()
                 continue
 
-            # halted = 0xD6
+            # Halted = 0xD6
             # This event is given when the host has requested a halt to the
             # device. The value paid at the point of halting is given in the event
             # data.
@@ -743,7 +760,7 @@ class SmartPayout(threading.Thread):
                 continue
 
             # floating = 0xD7
-            # The device is in the process of executing a float command and the
+            # The device is in the process of executing a float command, and the
             # value paid to the cashbox at the poll time is given in the event data.
             if event_code == PollEvents.floating:
                 amount, currency, num_bytes = self.get_int_str(data, idx + 1)
@@ -768,7 +785,7 @@ class SmartPayout(threading.Thread):
                     self._on_event_callback(event=PaymentCallbackEvents.CurrentScreen)
                 continue
 
-            # time_out = 0xD9
+            # Time_out = 0xD9
             # The device has been unable to complete a request. The value paid
             # up until the time-out point is given in the event data.
             if event_code == PollEvents.time_out:
@@ -777,7 +794,7 @@ class SmartPayout(threading.Thread):
                 logger.info(f'Timeout. {amount} {currency}')
                 continue
 
-            # incomplete_payout = 0xDC
+            # Incomplete_payout = 0xDC
             # The device has detected a discrepancy on power-up that the last
             # payout request was interrupted (possibly due to a power failure).
             # The amounts of the value paid and requested are given in the event data.
@@ -789,7 +806,7 @@ class SmartPayout(threading.Thread):
                 self._device.is_change_payout = True
                 continue
 
-            # incomplete_float = 0xDD
+            # Incomplete_float = 0xDD
             # The device has detected a discrepancy on power-up that the last
             # float request was interrupted (possibly due to a power failure). The
             # amounts of the value paid and requested are given in the event data.
@@ -799,7 +816,7 @@ class SmartPayout(threading.Thread):
                 logger.info(f'Incomplete float. requested: {requested}, dispensed: {dispensed} {currency}')
                 continue
 
-            # cashbox_paid = 0xDE
+            # Cashbox_paid = 0xDE
             # This is given at the end of a payout cycle. It shows the value of
             # stored coins that were routed to the cashbox that were paid into the
             # cashbox during the payout cycle.
@@ -809,7 +826,7 @@ class SmartPayout(threading.Thread):
                 logger.info(f'Cashbox paid. {amount} {currency}')
                 continue
 
-            # coin_credit = 0xDF
+            # Coin_credit = 0xDF
             # A coin has been detected as added to the system via the attached
             # coin mechanism. The value of the coin detected is given in the event
             # data.
@@ -827,7 +844,7 @@ class SmartPayout(threading.Thread):
                 continue
 
             # coin_mech_return_pressed = 0xC5
-            # The attached coin mechanism has been detected as having is reject
+            # The attached coin mechanism has been detected as having been reject
             # or return button pressed.
             if event_code == PollEvents.coin_mech_jammed:
                 logger.info('Coin mech return pressed')
@@ -853,7 +870,7 @@ class SmartPayout(threading.Thread):
                 self._device.is_change_cashbox = True
                 continue
 
-            # smart_emptying = 0xB3
+            # Smart_emptying = 0xB3
             # The device is in the process of carrying out its Smart Empty
             # command from the host. The value emptied at the poll point is given
             # in the event data.
@@ -863,7 +880,7 @@ class SmartPayout(threading.Thread):
                 logger.info(f'Smart emptying. {amount} {currency}')
                 continue
 
-            # smart_emptied = 0xB4
+            # Smart_emptied = 0xB4
             # The device has completed its Smart Empty command. The total
             # amount emptied is given in the event data.
             if event_code == PollEvents.smart_emptied:
@@ -875,7 +892,7 @@ class SmartPayout(threading.Thread):
                 self._device.is_change_cashbox = True
                 continue
 
-            # coin_mech_error = 0xB7
+            # Coin_mech_error = 0xB7
             # The attached coin mechanism has generated an error. Its code is
             # given in the event data.
             if event_code == PollEvents.coin_mech_error:
@@ -886,7 +903,7 @@ class SmartPayout(threading.Thread):
             # note_stored_in_payout = 0xDB
             # The note has been passed into the note store of the payout unit.
             if event_code == PollEvents.note_stored_in_payout:
-                self._payment.last_banknote_time = datetime.datetime.now()
+                self._payment.last_banknote_time = datetime.now()
                 channel_no = self.get_channel_no(self._payment.last_banknote_amount)
                 logger.info(
                     f'Note stored in payout. Last banknote: {self._payment.last_banknote_amount} ch: {channel_no}')
@@ -903,7 +920,7 @@ class SmartPayout(threading.Thread):
 
             if event_code == PollEvents.note_credit:
                 channel = data[idx + 1]
-                self._payment.last_banknote_time = datetime.datetime.now()
+                self._payment.last_banknote_time = datetime.now()
                 if channel < len(self._device.channels):
                     logger.info(
                         f'SmartPayout.poll: credit banknote {self._device.channels[channel].nominal} {self._device.channels[channel].currency}')
@@ -916,7 +933,7 @@ class SmartPayout(threading.Thread):
                 idx += 2
                 continue
 
-            # payout_out_of_service = 0xC6
+            # Payout_out_of_service = 0xC6
             # This event is given if the payout goes out of service during
             # operation. If this event is detected after a poll, the host can send
             # the ENABLE PAYOUT DEVICE command to determine if the payout
@@ -926,17 +943,17 @@ class SmartPayout(threading.Thread):
                 idx += 1
                 continue
 
-            # jam_recovery = 0xB0
+            # Jam_recovery = 0xB0
             # The SMART Payout unit is in the process of recovering from a
             # detected jam. This process will typically move five notes to the cash
-            # box; this is done to minimise the possibility the unit will go out of
+            # box; this is done to minimize the possibility the unit will go out of
             # service
             if event_code == PollEvents.jam_recovery:
                 logger.info('Jam recovery')
                 idx += 1
                 continue
 
-            # error_during_payout = 0xB1
+            # Error_during_payout = 0xB1
             # Returned if an error is detected whilst moving a note inside the
             # SMART Payout unit. The cause of error (1 byte) indicates the source
             # of the condition; 0x00 for note not being correctly detected as it is
@@ -995,7 +1012,7 @@ class SmartPayout(threading.Thread):
             if event_code == PollEvents.note_held_bezel:
                 amount, currency, num_bytes = self.get_only_int_str(data, idx + 1)
                 idx += num_bytes + 1
-                self._payment.last_banknote_time = datetime.datetime.now()
+                self._payment.last_banknote_time = datetime.now()
                 logger.info(f'Note held in bezel. {amount} {currency}')
                 if not self._payment.last_note_in_bezel:
                     self._payment.last_note_in_bezel = amount
@@ -1046,7 +1063,7 @@ class SmartPayout(threading.Thread):
                 idx += 1
                 continue
 
-            # device_full = 0xC9
+            # Device_full = 0xC9
             # This event is reported when the Note Float has reached its limit of
             # stored notes. This event will be reported until a note is paid out or
             # stacked.
@@ -1144,7 +1161,7 @@ class SmartPayout(threading.Thread):
         res = True
         while res:
             with self._payment_locker:
-                res = (self._payment.last_banknote_time + datetime.timedelta(seconds=5)) > datetime.datetime.now()
+                res = (self._payment.last_banknote_time + timedelta(seconds=5)) > datetime.now()
             if res:
                 time.sleep(0.5)
         return
@@ -1156,7 +1173,7 @@ class SmartPayout(threading.Thread):
         self._payment.requested_payout = 0  # запрошенная сумма на выдачу
         self._payment.payout = 0  # выданная сумма
         # self._payment.last_banknote_amount = 0  # номинал последней банкноты
-        # self._payment.last_banknote_time = datetime.datetime.now()  # время последней операции с банкнотой
+        # self._payment.last_banknote_time = datetime.now()  # время последней операции с банкнотой
         self._disabled_other_payment = False  #
         self._payment.last_note_dispensing = 0
         self._payment.last_note_in_bezel = 0
@@ -1168,7 +1185,7 @@ class SmartPayout(threading.Thread):
         """
         Запрос на прием наличности
         """
-        logger = logging.getLogger(cfg.APP_NAME + __name__ + '.' + inspect.stack()[0][3])
+        logger = logging.getLogger(APP_NAME + __name__ + '.' + inspect.stack()[0][3])
         if not isinstance(amount, int) or amount <= 0:
             logger.error(f'SmartPayout.PaymentRequest: incorrect amount value {amount}')
         if not self.is_device_ok():
@@ -1188,7 +1205,7 @@ class SmartPayout(threading.Thread):
         """
         Запрос на выдачу наличности
         """
-        logger = logging.getLogger(cfg.APP_NAME + __name__ + '.' + inspect.stack()[0][3])
+        logger = logging.getLogger(APP_NAME + __name__ + '.' + inspect.stack()[0][3])
         if not isinstance(amount, int) or amount <= 0:
             logger.error(f'SmartPayout.PayoutRequest: incorrect amount value {amount}')
         if not self.is_device_ok():
@@ -1205,8 +1222,8 @@ class SmartPayout(threading.Thread):
         return True
 
     def CancelRequest(self) -> bool:
-        logger = logging.getLogger(cfg.APP_NAME + __name__ + '.' + inspect.stack()[0][3])
-        # check device in filling mode
+        logger = logging.getLogger(APP_NAME + __name__ + '.' + inspect.stack()[0][3])
+        # check a device in filling mode
         if self._payment.mode == PaymentMode.filling:
             return self._ExitFillingMode()
 
@@ -1222,10 +1239,10 @@ class SmartPayout(threading.Thread):
         return True
 
     def EnterServiceMode(self) -> bool:
-        logger = logging.getLogger(cfg.APP_NAME + __name__ + '.' + inspect.stack()[0][3])
+        logger = logging.getLogger(APP_NAME + __name__ + '.' + inspect.stack()[0][3])
         self.wait_banknote_operation()
         with self._payment_locker:
-            if (self._payment.mode != PaymentMode.ready):
+            if self._payment.mode != PaymentMode.ready:
                 logger.error(f'SmartPayout.EnterServiceMode: Error enter service mode,'
                              f'incorrect mode {self._payment.mode}')
                 return False
@@ -1236,10 +1253,10 @@ class SmartPayout(threading.Thread):
         return True
 
     def ExitServiceMode(self) -> bool:
-        logger = logging.getLogger(cfg.APP_NAME + __name__ + '.' + inspect.stack()[0][3])
+        logger = logging.getLogger(APP_NAME + __name__ + '.' + inspect.stack()[0][3])
         self.wait_banknote_operation()
         with self._payment_locker:
-            if (self._payment.mode != PaymentMode.service):
+            if self._payment.mode != PaymentMode.service:
                 logger.error(f'SmartPayout.ExitServiceMode: Error exit service mode,'
                              f'incorrect mode {self._payment.mode}')
                 return False
@@ -1250,7 +1267,7 @@ class SmartPayout(threading.Thread):
         return True
 
     def ReadPayoutChannelsInfo(self) -> None:
-        logger = logging.getLogger(cfg.APP_NAME + __name__ + '.' + inspect.stack()[0][3])
+        logger = logging.getLogger(APP_NAME + __name__ + '.' + inspect.stack()[0][3])
         for channel in self._device.channels:
             if channel.id:
                 # Stored notes
@@ -1264,7 +1281,7 @@ class SmartPayout(threading.Thread):
         logger.info(f'ReadPayoutChannelsInfo: channels_info={self._device.get_payout_info()}')
 
     def ResetPayoutStateInfo(self) -> None:
-        logger = logging.getLogger(cfg.APP_NAME + __name__ + '.' + inspect.stack()[0][3])
+        logger = logging.getLogger(APP_NAME + __name__ + '.' + inspect.stack()[0][3])
         logger.info(f'ResetPayoutStateInfo: ...')
         try:
             for channel in self._device.channels:
@@ -1274,7 +1291,7 @@ class SmartPayout(threading.Thread):
             logger.error(f'ResetPayoutStateInfo: {se}')
 
     def UpdatePayoutStateInfo(self) -> None:
-        logger = logging.getLogger(cfg.APP_NAME + __name__ + '.' + inspect.stack()[0][3])
+        logger = logging.getLogger(APP_NAME + __name__ + '.' + inspect.stack()[0][3])
         logger.info(f'UpdatePayoutStateInfo: ...')
         try:
             if not self._device.is_change_payout:
@@ -1287,7 +1304,7 @@ class SmartPayout(threading.Thread):
             logger.error(f'UpdatePayoutStateInfo: {se}')
 
     def SetPayoutConfig(self, channels_list: list = None) -> bool:
-        logger = logging.getLogger(cfg.APP_NAME + __name__ + '.' + inspect.stack()[0][3])
+        logger = logging.getLogger(APP_NAME + __name__ + '.' + inspect.stack()[0][3])
         logger.info(f'SetPayoutConfig: {channels_list}')
         if channels_list is None:
             logger.error(f'SetPayoutConfig: empty config')
@@ -1328,7 +1345,7 @@ class SmartPayout(threading.Thread):
         return True
 
     def ResetCashboxStateInfo(self) -> None:
-        logger = logging.getLogger(cfg.APP_NAME + __name__ + '.' + inspect.stack()[0][3])
+        logger = logging.getLogger(APP_NAME + __name__ + '.' + inspect.stack()[0][3])
         logger.info(f'ResetCashboxStateInfo: ...')
         try:
             for channel in self._device.channels:
@@ -1338,7 +1355,7 @@ class SmartPayout(threading.Thread):
             logger.error(f'ResetCashboxStateInfo: {se}')
 
     def UpdateCashboxStateInfo(self) -> None:
-        logger = logging.getLogger(cfg.APP_NAME + __name__ + '.' + inspect.stack()[0][3])
+        logger = logging.getLogger(APP_NAME + __name__ + '.' + inspect.stack()[0][3])
         logger.info(f'UpdateCashboxStateInfo: ...')
         try:
             if not self._device.is_change_cashbox:
@@ -1346,13 +1363,13 @@ class SmartPayout(threading.Thread):
             self._device.is_change_cashbox = False
             self._on_event_callback(event=PaymentCallbackEvents.UpdateCashboxInfo,
                                     channels_info=self._device.get_cashbox_info(),
-                                    report_number=receipt_module.get_receiptnum() + 1)
+                                    report_number=self.get_receipt_number())
         except Exception as se:
             logger.error(f'UpdateCashboxStateInfo: {se}')
 
-    def _EnterFillingMode(self, print_lines: dict = None) -> bool:
+    def _EnterFillingMode(self) -> bool:
         self.wait_banknote_operation()
-        logger = logging.getLogger(cfg.APP_NAME + __name__ + '.' + inspect.stack()[0][3])
+        logger = logging.getLogger(APP_NAME + __name__ + '.' + inspect.stack()[0][3])
         logger.info(f'SmartPayout._EnterFillingMode: payment amount: {self._payment.payment}')
         if self._payment.mode != PaymentMode.ready:
             return False
@@ -1378,9 +1395,9 @@ class SmartPayout(threading.Thread):
         return True
         # return False
 
-    def _ExitFillingMode(self, print_lines: dict = None) -> bool:
+    def _ExitFillingMode(self) -> bool:
         self.wait_banknote_operation()
-        logger = logging.getLogger(cfg.APP_NAME + __name__ + '.' + inspect.stack()[0][3])
+        logger = logging.getLogger(APP_NAME + __name__ + '.' + inspect.stack()[0][3])
         logger.info(f'SmartPayout._ExitFillingMode: payment amount: {self._payment.payment}')
 
         # channels_info = self.GetPayoutChannelsInfo()
@@ -1432,14 +1449,10 @@ class SmartPayout(threading.Thread):
         report_title = ReportTypeTitle.get(report_type, '')
 
         line_width = 30
-        paystation_no = 0
-        paystation_name = ''
-        if appconf and appconf.config_data:
-            if isinstance(appconf.config_data, dict):
-                paystation_no = appconf.config_data['device']['ABACUSProperties']['tccId']
-                paystation_name = appconf.config_data['device']['ABACUSProperties']['tccName'][:line_width]
-        receipt_no = receipt_module.get_receiptnum() + 1
-        date_obj = datetime.datetime.now()
+        paystation_no = 1
+        paystation_name = 'Станция'
+        receipt_no = self.get_receipt_number()
+        date_obj = datetime.now()
 
         paystation_text = f'Касса №{paystation_no}'
         time_text = f'{date_obj:%d.%m.%Y %H:%M:%S}'
@@ -1513,7 +1526,7 @@ class SmartPayout(threading.Thread):
 
     def _EnterEmptyMode(self) -> bool:
         self.wait_banknote_operation()
-        logger = logging.getLogger(cfg.APP_NAME + __name__ + '.' + inspect.stack()[0][3])
+        logger = logging.getLogger(APP_NAME + __name__ + '.' + inspect.stack()[0][3])
         if self._payment.mode != PaymentMode.ready:
             logger.error(f'SmartPayout._EnterEmptyMode: current payment mode: {self._payment.mode}')
             return False
@@ -1530,7 +1543,7 @@ class SmartPayout(threading.Thread):
         return False
 
     def _ExitEmptyMode(self) -> bool:
-        logger = logging.getLogger(cfg.APP_NAME + __name__ + '.' + inspect.stack()[0][3])
+        logger = logging.getLogger(APP_NAME + __name__ + '.' + inspect.stack()[0][3])
         logger.info(f'SmartPayout._ExitEmptyMode:')
 
         print_lines = self.GetReportForm(report_type=ReportType.CashboxInfoExit)
@@ -1542,7 +1555,7 @@ class SmartPayout(threading.Thread):
         return True
 
     def CashboxRemoved(self) -> bool:
-        logger = logging.getLogger(cfg.APP_NAME + __name__ + '.' + inspect.stack()[0][3])
+        logger = logging.getLogger(APP_NAME + __name__ + '.' + inspect.stack()[0][3])
         logger.info(f'SmartPayout.CashboxRemove:')
 
         print_lines = self.GetReportForm(report_type=ReportType.CashboxRemoved)
@@ -1551,7 +1564,7 @@ class SmartPayout(threading.Thread):
         return True
 
     def CashboxReplaced(self) -> bool:
-        logger = logging.getLogger(cfg.APP_NAME + __name__ + '.' + inspect.stack()[0][3])
+        logger = logging.getLogger(APP_NAME + __name__ + '.' + inspect.stack()[0][3])
         logger.info(f'SmartPayout.CashboxReplaced:')
         print_lines = self.GetReportForm(report_type=ReportType.CashboxReplaced)
         self._on_event_callback(event=PaymentCallbackEvents.CashboxReplaced,
@@ -1559,7 +1572,7 @@ class SmartPayout(threading.Thread):
         return True
 
     def EmptyHopper(self) -> bool:
-        logger = logging.getLogger(cfg.APP_NAME + __name__ + '.' + inspect.stack()[0][3])
+        logger = logging.getLogger(APP_NAME + __name__ + '.' + inspect.stack()[0][3])
         logger.info(f'EmptyHopper: ')
         if self.GetPayoutAmount() > 0:
             return self._EnterEmptyMode()
@@ -1567,7 +1580,7 @@ class SmartPayout(threading.Thread):
             return False
 
     def PrintPayStationReport(self) -> bool:
-        logger = logging.getLogger(cfg.APP_NAME + __name__ + '.' + inspect.stack()[0][3])
+        logger = logging.getLogger(APP_NAME + __name__ + '.' + inspect.stack()[0][3])
         logger.info(f'SmartPayout.PrintPayStationReport:')
         self.wait_banknote_operation()
         if self._payment.mode != PaymentMode.ready:
@@ -1580,15 +1593,15 @@ class SmartPayout(threading.Thread):
         return True
 
     def StateSave(self, include_session: bool = True) -> bool:
-        logger = logging.getLogger(cfg.APP_NAME + __name__ + '.' + inspect.stack()[0][3])
+        logger = logging.getLogger(APP_NAME + __name__ + '.' + inspect.stack()[0][3])
         try:
             with open(itl_payment_state_file, 'wb') as f:
-                pickle.dump(self._payment, f)
+                pickle.dump(self._payment, f)           # type: ignore
                 f.flush()
             with open(itl_device_state_file, 'wb') as f:
-                pickle.dump(self._device, f)
+                pickle.dump(self._device, f)            # type: ignore
                 f.flush()
-            if 'posix' in sys.builtin_module_names:
+            if 'posix' in builtin_module_names:
                 os.sync()
             if include_session:
                 self._on_event_callback(event=PaymentCallbackEvents.SaveSessionData)
@@ -1598,7 +1611,7 @@ class SmartPayout(threading.Thread):
             return False
 
     def StateRestore(self) -> bool:
-        logger = logging.getLogger(cfg.APP_NAME + __name__ + '.' + inspect.stack()[0][3])
+        logger = logging.getLogger(APP_NAME + __name__ + '.' + inspect.stack()[0][3])
         try:
             if os.path.isfile(itl_payment_state_file):
                 with open(itl_payment_state_file, 'rb') as f:
@@ -1622,7 +1635,7 @@ class SmartPayout(threading.Thread):
 
             # common operations
             self._payment.last_banknote_amount = 0
-            self._payment.last_banknote_time = datetime.datetime.now()
+            self._payment.last_banknote_time = datetime.now()
             self._device.is_need_smartfloat = True
             return True
         except (OSError, EOFError, pickle.PickleError) as se:
@@ -1630,7 +1643,7 @@ class SmartPayout(threading.Thread):
         return False
 
     def FillProcess(self, payment_amount: int = 0) -> bool:
-        logger = logging.getLogger(cfg.APP_NAME + __name__ + '.' + inspect.stack()[0][3])
+        logger = logging.getLogger(APP_NAME + __name__ + '.' + inspect.stack()[0][3])
         with (self._payment_locker):
             try:
                 self._payment.payment += payment_amount
@@ -1652,7 +1665,7 @@ class SmartPayout(threading.Thread):
         return True
 
     def PaymentProcess(self, payment_amount: int = 0, payout_amount: int = 0) -> bool:
-        logger = logging.getLogger(cfg.APP_NAME + __name__ + '.' + inspect.stack()[0][3])
+        logger = logging.getLogger(APP_NAME + __name__ + '.' + inspect.stack()[0][3])
         logger.info(f'SmartPayout.PaymentProcess: payment = {payment_amount}, payout = {payout_amount}')
         # logger.info(f'SmartPayout.PaymentProcess: credit = {credit_amount}, dispensed = {dispensed_amount}')
         with (self._payment_locker):
@@ -1660,7 +1673,7 @@ class SmartPayout(threading.Thread):
                 # logger.info(f'TEST: SmartPayout.PaymentProcess: _payment_locker. mode: {self._payment.mode}...')
 
                 # <editor-fold desc="cancel payment operation">
-                if (self._payment.mode == PaymentMode.request_cancel):
+                if self._payment.mode == PaymentMode.request_cancel:
                     amount = self._payment.payment - self._payment.payout
                     if amount == 0:
                         self.PaymentReset()
@@ -1692,7 +1705,7 @@ class SmartPayout(threading.Thread):
                 # </editor-fold>
 
                 # check need payout
-                if (self._payment.mode == PaymentMode.request_payout):
+                if self._payment.mode == PaymentMode.request_payout:
                     amount = self._payment.requested_payout - self._payment.payout
                     self.EnablePayment()
                     if self.sspPayout(amount, SSP_DEFAULT_CURRENCY) != SSPResponse.ok:
@@ -1779,9 +1792,9 @@ class SmartPayout(threading.Thread):
 
 
     def run(self) -> NoReturn:
-        logger = logging.getLogger(cfg.APP_NAME + __name__ + '.' + inspect.stack()[0][3])
+        logger = logging.getLogger(APP_NAME + __name__ + '.' + inspect.stack()[0][3])
         logger.info(f'SmartPayout.run: [{self.name}]')
-        thread_sleep(10)
+        thread_sleep(1)
         try:
             if self._on_event_callback:
                 self._on_event_callback(event=PaymentCallbackEvents.Init)
@@ -1804,12 +1817,12 @@ class SmartPayout(threading.Thread):
                     #             f'requested_payout: {self._payment.requested_payout},'
                     #             f'_payment.payout: {self._payment.payout}')
 
-                    # try open device
+                    # try an open device
                     if not self._device_port:
                         self.open_device()
 
                     # check device_out_of_service
-                    if (SSPState.error_page not in self._state):
+                    if SSPState.error_page not in self._state:
                         if not self.is_device_ok():
                             self.device_out_of_service()
                             continue
@@ -1844,7 +1857,7 @@ class SmartPayout(threading.Thread):
                                         (self._payment.mode == PaymentMode.payment and
                                          self._payment.payment < self._payment.requested_payment)
                                 ):
-                            # check need enable validator
+                            # check the need enable validator
                             if SSPState.disabled in self._state:
                                 logger.info(f'SmartPayout.run: try enable validator')
                                 if self.sspEnableValidator() == SSPResponse.ok:
@@ -1853,7 +1866,7 @@ class SmartPayout(threading.Thread):
                                     if self._payment.mode == PaymentMode.request_payment:
                                         self._payment.mode = PaymentMode.payment
                         else:
-                            # check need disable validator
+                            # check needs to disable validator
                             if SSPState.disabled not in self._state:
                                 logger.info(f'SmartPayout.run: try disable validator')
                                 if self.sspDisableValidator() == SSPResponse.ok:
@@ -1872,8 +1885,7 @@ class SmartPayout(threading.Thread):
                         # check need move banknotes to cashbox
                         if self._device.is_need_smartfloat and \
                                 self._payment.mode == PaymentMode.ready and \
-                                (self._payment.last_banknote_time + datetime.timedelta(
-                                    seconds=SSP_FLOAT_TIMEOUT)) < datetime.datetime.now():
+                                (self._payment.last_banknote_time + timedelta(seconds=SSP_FLOAT_TIMEOUT)) < datetime.now():
                             self.SmartFloat()
 
                     # poll events in 200..1000 ms
@@ -1886,19 +1898,19 @@ class SmartPayout(threading.Thread):
 
     def sspSetInhibits(self, mask_channels: int = 0xFFFF) -> SSPResponse:
         """
-        This function sends the set inhibits command to set the inhibits on the validator.
-        The two bytes after the command byte represent two bit registers with each bit being
-        a channel. 1-8 and 9-16 respectively. 0xFF = 11111111 in binary indicating all channels
-        in this register are able to accept notes.
+        This function sends the set inhibits command to set the inhibiting on the validator.
+        The two bytes after the command byte represent two-bit registers with each bit being a channel.
+        1-8 and 9-16 respectively.
+        0xFF in binary indicating all channels in this register are able to accept notes.
         """
-        logger = logging.getLogger(cfg.APP_NAME + __name__ + '.' + inspect.stack()[0][3])
+        logger = logging.getLogger(APP_NAME + __name__ + '.' + inspect.stack()[0][3])
         logger.info(f'SmartPayout.sspSetInhibits')
         channels_low = mask_channels & 0xFF  # channels 1..8   (10, 50, 100, 200, 500, 1000, 2000, 5000)
         channels_high = (mask_channels >> 8) & 0xFF  # channels 9..16  ()
         return self.exec_command([BNVCmd.set_channel_inhibits, channels_low, channels_high])[0]
 
     def sspSync(self) -> SSPResponse:
-        logger = logging.getLogger(cfg.APP_NAME + __name__ + '.' + inspect.stack()[0][3])
+        logger = logging.getLogger(APP_NAME + __name__ + '.' + inspect.stack()[0][3])
         logger.info(f'SmartPayout.sspSync')
         self._seq = 0x80
         return self.exec_command([GenericCmd.sync])[0]
@@ -1908,7 +1920,7 @@ class SmartPayout(threading.Thread):
         This function sets the protocol version in the validator to the version passed across. Whoever calls
         this needs to check the response to make sure the version is supported.
         """
-        logger = logging.getLogger(cfg.APP_NAME + __name__ + '.' + inspect.stack()[0][3])
+        logger = logging.getLogger(APP_NAME + __name__ + '.' + inspect.stack()[0][3])
         logger.info(f'SmartPayout.sspSetProtocolVersion')
         return self.exec_command([GenericCmd.host_protocol, version])[0]
 
@@ -1918,17 +1930,16 @@ class SmartPayout(threading.Thread):
         The response packet from the validator is a variable length depending on the number
         of channels in the dataset.
         """
-        logger = logging.getLogger(cfg.APP_NAME + __name__ + '.' + inspect.stack()[0][3])
+        logger = logging.getLogger(APP_NAME + __name__ + '.' + inspect.stack()[0][3])
         logger.info(f'SmartPayout.sspSetupRequest')
         res, data = self.exec_command([GenericCmd.setup_request])
         return res
 
     def sspEnablePayout(self) -> SSPResponse:
         """
-        Enables the payout facility of the validator which lets it store and
-        payout notes
-        ."""
-        logger = logging.getLogger(cfg.APP_NAME + __name__ + '.' + inspect.stack()[0][3])
+        Enables the payout facility of the validator which lets it store and payout notes.
+        """
+        logger = logging.getLogger(APP_NAME + __name__ + '.' + inspect.stack()[0][3])
         logger.info(f'SmartPayout.sspEnablePayout')
         res = self.exec_command([PayoutCmd.enable])[0]
         self._state.discard(SSPState.disabled)
@@ -1938,7 +1949,7 @@ class SmartPayout(threading.Thread):
         """
         Stops the validator from being able to store or payout notes.
         """
-        logger = logging.getLogger(cfg.APP_NAME + __name__ + '.' + inspect.stack()[0][3])
+        logger = logging.getLogger(APP_NAME + __name__ + '.' + inspect.stack()[0][3])
         logger.info(f'SmartPayout.sspDisablePayout')
         return self.exec_command([PayoutCmd.disable])[0]
 
@@ -1946,7 +1957,7 @@ class SmartPayout(threading.Thread):
         """
         The enable command allows the validator to act on commands sent to it.
         """
-        logger = logging.getLogger(cfg.APP_NAME + __name__ + '.' + inspect.stack()[0][3])
+        logger = logging.getLogger(APP_NAME + __name__ + '.' + inspect.stack()[0][3])
         logger.info(f'SmartPayout.sspEnableValidator')
         return self.exec_command([GenericCmd.enable])[0]
 
@@ -1954,7 +1965,7 @@ class SmartPayout(threading.Thread):
         """
         Disable command stops the validator acting on commands sent to it.
         """
-        logger = logging.getLogger(cfg.APP_NAME + __name__ + '.' + inspect.stack()[0][3])
+        logger = logging.getLogger(APP_NAME + __name__ + '.' + inspect.stack()[0][3])
         logger.info(f'SmartPayout.sspDisableValidator')
         rc, _ = self.exec_command([GenericCmd.disable])
         time.sleep(0.5)
@@ -1964,12 +1975,12 @@ class SmartPayout(threading.Thread):
         """
         The reset command instructs the validator to restart
         """
-        logger = logging.getLogger(cfg.APP_NAME + __name__ + '.' + inspect.stack()[0][3])
+        logger = logging.getLogger(APP_NAME + __name__ + '.' + inspect.stack()[0][3])
         logger.info(f'SmartPayout.sspResetValidator')
         return self.exec_command([GenericCmd.reset])[0]
 
     def sspGetMinimumPayout(self) -> (SSPResponse, int):
-        logger = logging.getLogger(cfg.APP_NAME + __name__ + '.' + inspect.stack()[0][3])
+        logger = logging.getLogger(APP_NAME + __name__ + '.' + inspect.stack()[0][3])
         res, data = self.exec_command([PayoutCmd.get_minimum_payout])
         logger.info(f'SmartPayout.sspGetMinimumPayout  data: {data}')
         if isinstance(data, bytes):
@@ -1979,7 +1990,7 @@ class SmartPayout(threading.Thread):
         return res, amount
 
     def sspFloatAmount(self, payout_amount: int = 0) -> SSPResponse:
-        logger = logging.getLogger(cfg.APP_NAME + __name__ + '.' + inspect.stack()[0][3])
+        logger = logging.getLogger(APP_NAME + __name__ + '.' + inspect.stack()[0][3])
         logger.info(f'SmartPayout.sspFloatAmount')
         res, data = self.exec_command([PayoutCmd.float_amount,
                                        (0 * SSP_SCALE_FACTOR).to_bytes(4, 'little'),
@@ -1989,7 +2000,7 @@ class SmartPayout(threading.Thread):
         return res
 
     def sspFloatByDenomination(self, payout_amount: dict = None) -> SSPResponse:
-        logger = logging.getLogger(cfg.APP_NAME + __name__ + '.' + inspect.stack()[0][3])
+        logger = logging.getLogger(APP_NAME + __name__ + '.' + inspect.stack()[0][3])
         logger.info(f'SmartPayout.sspFloatByDenomination')
         params = b''
         banknote_count = len(payout_amount)
@@ -2005,38 +2016,37 @@ class SmartPayout(threading.Thread):
 
     def sspEmpty(self) -> SSPResponse:
         """
-        This uses the EMPTY command to instruct the SMART Hopper to dump all stored
-        coins into the cashbox. The SMART Hopper will not keep a track of what coins
-        have been emptied.
+        This uses the EMPTY command to instruct the SMART Hopper to dump all stored coins into the cashbox.
+        The SMART Hopper will not keep track of what coins have been emptied.
         """
-        logger = logging.getLogger(cfg.APP_NAME + __name__ + '.' + inspect.stack()[0][3])
+        logger = logging.getLogger(APP_NAME + __name__ + '.' + inspect.stack()[0][3])
         logger.info(f'SmartPayout.sspEmpty')
         return self.exec_command([PayoutCmd.empty])[0]
 
     def sspSmartEmpty(self) -> SSPResponse:
         """
-        This uses the SMART EMPTY command to instruct the SMART Hopper to dump all stored
-        coins into the cashbox. The SMART Hopper will keep a track of what coins have been
-        emptied, this data can be retrieved using the CASHBOX PAYOUT OPERATION DATA command.
+        This uses the SMART EMPTY command to instruct the SMART Hopper to dump all stored coins into the cashbox.
+        The SMART Hopper will keep track of what coins have been emptied,
+        this data can be retrieved using the CASHBOX PAYOUT OPERATION DATA command.
         """
-        logger = logging.getLogger(cfg.APP_NAME + __name__ + '.' + inspect.stack()[0][3])
+        logger = logging.getLogger(APP_NAME + __name__ + '.' + inspect.stack()[0][3])
         logger.info(f'SmartPayout.sspSmartEmpty')
         return self.exec_command([PayoutCmd.smart_empty])[0]
 
     def sspSetGenerator(self, value: int) -> SSPResponse:
-        logger = logging.getLogger(cfg.APP_NAME + __name__ + '.' + inspect.stack()[0][3])
+        logger = logging.getLogger(APP_NAME + __name__ + '.' + inspect.stack()[0][3])
         logger.info(f'SmartPayout.sspSetGenerator')
         res = self.exec_command([EncryptedCmd.set_generator, value.to_bytes(8, 'little')])[0]
         return res
 
     def sspSetModulus(self, value: int) -> SSPResponse:
-        logger = logging.getLogger(cfg.APP_NAME + __name__ + '.' + inspect.stack()[0][3])
+        logger = logging.getLogger(APP_NAME + __name__ + '.' + inspect.stack()[0][3])
         logger.info(f'SmartPayout.sspSetModulus')
         res = self.exec_command([EncryptedCmd.set_modulus, value.to_bytes(8, 'little')])[0]
         return res
 
     def sspKeyExchange(self, value: int) -> (SSPResponse, int):
-        logger = logging.getLogger(cfg.APP_NAME + __name__ + '.' + inspect.stack()[0][3])
+        logger = logging.getLogger(APP_NAME + __name__ + '.' + inspect.stack()[0][3])
         logger.info(f'SmartPayout.sspKeyExchange')
         res, data = self.exec_command([EncryptedCmd.key_exchange, value.to_bytes(8, 'little')])
         key = None
@@ -2045,7 +2055,7 @@ class SmartPayout(threading.Thread):
         return res, key
 
     def sspGetSerianNumber(self) -> (SSPResponse, int):
-        logger = logging.getLogger(cfg.APP_NAME + __name__ + '.' + inspect.stack()[0][3])
+        logger = logging.getLogger(APP_NAME + __name__ + '.' + inspect.stack()[0][3])
         logger.info(f'SmartPayout.sspGetSerialNumber')
         res, data = self.exec_command([GenericCmd.get_serial_number])
         sn = 0
@@ -2054,7 +2064,7 @@ class SmartPayout(threading.Thread):
         return res, sn
 
     def sspGetFirmwareVersion(self) -> (SSPResponse, str):
-        logger = logging.getLogger(cfg.APP_NAME + __name__ + '.' + inspect.stack()[0][3])
+        logger = logging.getLogger(APP_NAME + __name__ + '.' + inspect.stack()[0][3])
         logger.info(f'SmartPayout.sspGetFirmwareVersion')
         res, data = self.exec_command([GenericCmd.get_firmware_version])
         ver = ''
@@ -2063,7 +2073,7 @@ class SmartPayout(threading.Thread):
         return res, ver
 
     def sspGetBuildRevision(self) -> (SSPResponse, str):
-        logger = logging.getLogger(cfg.APP_NAME + __name__ + '.' + inspect.stack()[0][3])
+        logger = logging.getLogger(APP_NAME + __name__ + '.' + inspect.stack()[0][3])
         logger.info(f'SmartPayout.sspGetBuildRevision')
         res, data = self.exec_command([GenericCmd.get_build_revision])
         device_type = 0
@@ -2079,7 +2089,7 @@ class SmartPayout(threading.Thread):
         """
         Gets the number of notes stored and reports them in a string which is passed as a parameter.
         """
-        logger = logging.getLogger(cfg.APP_NAME + __name__ + '.' + inspect.stack()[0][3])
+        logger = logging.getLogger(APP_NAME + __name__ + '.' + inspect.stack()[0][3])
         logger.info(f'SmartPayout.sspGetNoteAmount')
         res, data = self.exec_command([PayoutCmd.get_note_amount,
                                        (amount * SSP_SCALE_FACTOR).to_bytes(4, 'little'),
@@ -2093,11 +2103,11 @@ class SmartPayout(threading.Thread):
         """
         This function uses the GET CASHBOX PAYOUT OPERATION DATA command which
         instructs the SMART Hopper to report the number of coins moved and their
-        denominations in the last cashbox operation. This could be a dispense, float
-        or SMART empty.
+        denominations in the last cashbox operation.
+        This could be a dispensed, float or SMART empty.
         Return dict {amount: counter, amount: counter, ...}
         """
-        logger = logging.getLogger(cfg.APP_NAME + __name__ + '.' + inspect.stack()[0][3])
+        logger = logging.getLogger(APP_NAME + __name__ + '.' + inspect.stack()[0][3])
         logger.info(f'SmartPayout.sspGetCashboxPayoutOpData')
         res, data = self.exec_command([PayoutCmd.cashbox_payout_op_data])
         notes_info = None
@@ -2112,7 +2122,7 @@ class SmartPayout(threading.Thread):
         return res, notes_info
 
     def sspPayout(self, value: int, currency: str) -> SSPResponse:
-        logger = logging.getLogger(cfg.APP_NAME + __name__ + '.' + inspect.stack()[0][3])
+        logger = logging.getLogger(APP_NAME + __name__ + '.' + inspect.stack()[0][3])
         # for i in range(3):
         self.wait_banknote_operation()
         while True:
@@ -2137,6 +2147,8 @@ class SmartPayout(threading.Thread):
                     error_msg = 'Device disabled'
                 else:
                     error_msg = 'Payout unknow error code'
+            else:
+                error_msg = 'Unknow payour error'
 
             logger.error(f'SmartPayout.sspPayout: msg: {error_msg}, code: {error_code}')
             if error_code != 0x03:
@@ -2151,7 +2163,7 @@ class SmartPayout(threading.Thread):
         # return SSPResponse.failure
 
     def sspPayoutByDenomination(self, banknotes: Dict[int, int]) -> SSPResponse:  # banknotes = {50: 1, 100: 1, ...}
-        logger = logging.getLogger(cfg.APP_NAME + __name__ + '.' + inspect.stack()[0][3])
+        logger = logging.getLogger(APP_NAME + __name__ + '.' + inspect.stack()[0][3])
         banknotes_count = len(banknotes)
         self.wait_banknote_operation()
         if banknotes_count:
@@ -2184,6 +2196,8 @@ class SmartPayout(threading.Thread):
                     error_msg = 'Device disabled'
                 else:
                     error_msg = 'Payout unknow error code'
+            else:
+                error_msg = 'Unknow payout error'
 
             logger.error(f'SmartPayout.sspPayoutByDenomination: msg: {error_msg}, code: {error_code}')
             if error_code != 0x03:
@@ -2198,7 +2212,7 @@ class SmartPayout(threading.Thread):
         on what the last recorded reason was for rejecting a note. The reason is
         returned as a single byte.
         """
-        logger = logging.getLogger(cfg.APP_NAME + __name__ + '.' + inspect.stack()[0][3])
+        logger = logging.getLogger(APP_NAME + __name__ + '.' + inspect.stack()[0][3])
         logger.info(f'SmartPayout.sspQueryRejection')
         res, data = self.exec_command([BNVCmd.last_reject])
         reject_code = None
@@ -2210,22 +2224,22 @@ class SmartPayout(threading.Thread):
 
     def sspPoll(self) -> (SSPResponse, Union[bytes, None]):
         """
-        This uses the SMART EMPTY command to instruct the SMART Hopper to dump all stored
-        coins into the cashbox. The SMART Hopper will keep a track of what coins have been
-        emptied, this data can be retrieved using the CASHBOX PAYOUT OPERATION DATA command.
+        This uses the SMART EMPTY command to instruct the SMART Hopper to dump all stored coins into the cashbox.
+        The SMART Hopper will keep track of what coins have been emptied,
+        this data can be retrieved using the CASHBOX PAYOUT OPERATION DATA command.
         """
-        # logger = logging.getLogger(cfg.APP_NAME + __name__ + '.' + inspect.stack()[0][3])
+        # logger = logging.getLogger(APP_NAME + __name__ + '.' + inspect.stack()[0][3])
         # logger.info(f'SmartPayout.sspPoll')
         res, data = self.exec_command([GenericCmd.poll])
         return res, data
 
     def sspHold(self) -> SSPResponse:
         """
-        This uses the SMART EMPTY command to instruct the SMART Hopper to dump all stored
-        coins into the cashbox. The SMART Hopper will keep a track of what coins have been
-        emptied, this data can be retrieved using the CASHBOX PAYOUT OPERATION DATA command.
+        This uses the SMART EMPTY command to instruct the SMART Hopper to dump all stored coins into the cashbox.
+        The SMART Hopper will keep track of what coins have been emptied,
+        this data can be retrieved using the CASHBOX PAYOUT OPERATION DATA command.
         """
-        logger = logging.getLogger(cfg.APP_NAME + __name__ + '.' + inspect.stack()[0][3])
+        logger = logging.getLogger(APP_NAME + __name__ + '.' + inspect.stack()[0][3])
         logger.info(f'SmartPayout.sspHold')
         res, data = self.exec_command([BNVCmd.hold])
         return res
@@ -2237,14 +2251,14 @@ class SmartPayout(threading.Thread):
             0x00 indicates routing for storage.
             0x01 as the second byte indicates that the selected note should be routed to the cashbox,
         """
-        logger = logging.getLogger(cfg.APP_NAME + __name__ + '.' + inspect.stack()[0][3])
+        logger = logging.getLogger(APP_NAME + __name__ + '.' + inspect.stack()[0][3])
         logger.info(f'SmartPayout.sspSetNoteRoute')
         res = self.exec_command(
             [PayoutCmd.set_route, route, (value * SSP_SCALE_FACTOR).to_bytes(4, 'little'), currency.upper()])[0]
         return res
 
     def SmartFloat(self) -> bool:
-        logger = logging.getLogger(cfg.APP_NAME + __name__ + '.' + inspect.stack()[0][3])
+        logger = logging.getLogger(APP_NAME + __name__ + '.' + inspect.stack()[0][3])
         is_need_float = False
         device_banknote_counter = 0
         float_banknotes = {}
@@ -2276,7 +2290,7 @@ class SmartPayout(threading.Thread):
     def AlarmCheck(self) -> bool:
 
         # one time alarm for SSP_ALARM_TIMEOUT
-        # if (self._device.alarm_last_time + datetime.timedelta(seconds=SSP_ALARM_TIMEOUT)) > datetime.datetime.now():
+        # if (self._device.alarm_last_time + timedelta(seconds=SSP_ALARM_TIMEOUT)) > datetime.now():
         #     return False
 
         is_exist_alarm = False
@@ -2308,7 +2322,7 @@ class SmartPayout(threading.Thread):
                     self._on_event_callback(event=PaymentCallbackEvents.BanknoteLow, amount_note=channel.nominal)
                     is_exist_alarm = True
         if is_exist_alarm:
-            self._device.alarm_last_time = datetime.datetime.now()
+            self._device.alarm_last_time = datetime.now()
         return is_exist_alarm
 
     def ErrorCheck(self) -> bool:
@@ -2327,21 +2341,21 @@ class SmartPayout(threading.Thread):
         if not self._keys.Generator or not self._keys.Modulus:
             return False
 
-        self._keys.HostRandom = random.randint(0, MAX_PRIME_NUMBER)
+        self._keys.HostRandom = randint(0, MAX_PRIME_NUMBER)
 
         self._keys.Generator = 139791917
         self._keys.Modulus = 769202429
         self._keys.HostRandom = 229216279
 
-        self._keys.HostInter = XpowYmodN(self._keys.Generator, self._keys.HostRandom, self._keys.Modulus)
+        self._keys.HostInter = xpow_ymod_n(self._keys.Generator, self._keys.HostRandom, self._keys.Modulus)
         return True
 
     def InitiateSSPHostKeys(self):
         self._keys = SSPKeys()
         # create the two random prime numbers
-        self._keys.Generator = GeneratePrime(MAX_PRIME_NUMBER)
-        self._keys.Modulus = GeneratePrime(MAX_PRIME_NUMBER)
-        # make sure Generator is larger than Modulus
+        self._keys.Generator = generate_prime(MAX_PRIME_NUMBER)
+        self._keys.Modulus = generate_prime(MAX_PRIME_NUMBER)
+        # make sure the Generator is larger than Modulus
         if self._keys.Generator > self._keys.Modulus:
             self._keys.Generator, self._keys.Modulus = self._keys.Modulus, self._keys.Generator
 
@@ -2350,9 +2364,10 @@ class SmartPayout(threading.Thread):
 
         # reset the apcket counter here for a successful key neg
         self._encPktCount[self.address] = 0
+        return True
 
     def CreateSSPHostEncryptionKey(self) -> bool:
-        self._keys.KeyHost = XpowYmodN(self._keys.SlaveInterKey, self._keys.HostRandom, self._keys.Modulus)
+        self._keys.KeyHost = xpow_ymod_n(self._keys.SlaveInterKey, self._keys.HostRandom, self._keys.Modulus)
         return True
 
     def NegotiateKeys(self) -> bool:
@@ -2374,7 +2389,7 @@ class SmartPayout(threading.Thread):
         return True
 
     def GetStoredNotes(self) -> bool:
-        logger = logging.getLogger(cfg.APP_NAME + __name__ + '.' + inspect.stack()[0][3])
+        logger = logging.getLogger(APP_NAME + __name__ + '.' + inspect.stack()[0][3])
         logger.info('Notes stored:\n')
         for _, amount in SSP_DEFAULT_CHANNEL_VALUES.items():
             if amount > 0:
@@ -2393,7 +2408,7 @@ class SmartPayout(threading.Thread):
         return True
 
     def GetPayoutAmount(self) -> int:
-        logger = logging.getLogger(cfg.APP_NAME + __name__ + '.' + inspect.stack()[0][3])
+        logger = logging.getLogger(APP_NAME + __name__ + '.' + inspect.stack()[0][3])
         logger.info(f'GetPayoutAmount: ')
         amount = 0
         for channel in self._device.channels:
@@ -2417,9 +2432,9 @@ class SmartPayout(threading.Thread):
         self._global_service_mode = flag
 
     def SetupRequest(self) -> bool:
-        # res = self.sspSetupRequest()
-        # if res != SSPResponse.ok:
-        #    return False
+        res = self.sspSetupRequest()
+        if res != SSPResponse.ok:
+           return False
         return True
 
     def UpdateCounterRequest(self):
@@ -2427,7 +2442,7 @@ class SmartPayout(threading.Thread):
         self._device.is_change_cashbox = True
 
     def SetNotesRoute(self) -> bool:
-        logger = logging.getLogger(cfg.APP_NAME + __name__ + '.' + inspect.stack()[0][3])
+        logger = logging.getLogger(APP_NAME + __name__ + '.' + inspect.stack()[0][3])
         for _, amount in SSP_DEFAULT_CHANNEL_VALUES.items():
             if amount > 0:
                 res = self.sspSetNoteRoute(RouteModes.payouts, amount, SSP_DEFAULT_CURRENCY)
@@ -2438,7 +2453,7 @@ class SmartPayout(threading.Thread):
         return True
 
     def EnablePayment(self) -> bool:
-        logger = logging.getLogger(cfg.APP_NAME + __name__ + '.' + inspect.stack()[0][3])
+        logger = logging.getLogger(APP_NAME + __name__ + '.' + inspect.stack()[0][3])
         # res = self.SetNotesRoute()
         res = self.sspEnablePayout() == SSPResponse.ok
         if res:
@@ -2448,7 +2463,7 @@ class SmartPayout(threading.Thread):
         return res
 
     def DisablePayment(self) -> bool:
-        logger = logging.getLogger(cfg.APP_NAME + __name__ + '.' + inspect.stack()[0][3])
+        logger = logging.getLogger(APP_NAME + __name__ + '.' + inspect.stack()[0][3])
         # res = self.SetNotesRoute()
         res = self.sspDisablePayout() == SSPResponse.ok
         if res:
@@ -2458,67 +2473,78 @@ class SmartPayout(threading.Thread):
         return res
 
 
-from MSL.tickets import Ticket
-from printers.custom_printer import CustomPrinter
-
-printer: typing.Optional[CustomPrinter] = None
-
-
-def printer_on_event(*, event_type: str, ticket: Ticket):
-    if ticket and isinstance(ticket, Ticket):
-        print(f'event: {event_type}, carrier={ticket.card_carrier}')
-    else:
-        print(f'event: {event_type}')
-    pass
-
-
 def smartpayout_on_event(*, event, **kwargs):
-    global printer
 
-    logger = logging.getLogger(cfg.APP_NAME + __name__ + '.' + inspect.stack()[0][3])
-    logger.info(f'event: {event} {kwargs}')
+    logger = logging.getLogger(APP_NAME + __name__ + '.' + inspect.stack()[0][3])
+    logger.info(f'event: {PaymentCallbackEvents(event).name} params: {kwargs}')
 
     print_lines = kwargs.get('print_lines', '')
     if print_lines:
         print_lines = '\n'.join(print_lines)
         logger.error(f'print_lines: {print_lines}')
-        if printer:
-            printer.send_form(print_lines=print_lines)
 
-    if event == PaymentCallbackEvents.EnterEmptyingMode:
-        pass
-
+    if event == PaymentCallbackEvents.DeviceInService:
+        print(f'Событие: устройство в работе')
+    elif event == PaymentCallbackEvents.DeviceOutOfService:
+        print(f'Событие: устройство не работает')
+    elif event == PaymentCallbackEvents.EnterEmptyingMode:
+        print(f'Событие: Вход устройства в режим сброса наличности в бокс')
     elif event == PaymentCallbackEvents.ExitEmptyingMode:
-        pass
-
-    if event == PaymentCallbackEvents.EnterFillingMode:
-        pass
-
+        print(f'Событие: Выход устройства из режима сброса наличности в бокс')
+    elif event == PaymentCallbackEvents.PaymentStart:
+        print(f'Событие: Начат процесс приема банкноты')
+    elif event == PaymentCallbackEvents.PaymentNote:
+        print(f'Событие: Принята банкнота [{kwargs["amount_note"]}]')
+    elif event == PaymentCallbackEvents.PaymentComplete:
+        print(f'Событие: Сумма принята полностью, сдача выдана (в случае необходимости) [{kwargs["amount_paid"]}]')
+    elif event == PaymentCallbackEvents.PayoutNote:
+        print(f'Событие: Выдана банкнота [{kwargs["amount_note"]}]')
+    elif event == PaymentCallbackEvents.PayoutComplete:
+        print(f'Событие: Вся запрошенная сумма выдана [{kwargs["amount_payout"]}]')
+    elif event == PaymentCallbackEvents.CancelRequest:
+        print(f'Событие: Запрошена отмена операции')
+    elif event == PaymentCallbackEvents.CancelComplete:
+        print(f'Событие: Операция отмены произведена успешна [{kwargs["amount_payout"]}]')
+    elif event == PaymentCallbackEvents.EnterFillingMode:
+        print(f'Событие: Вход устройства в режим внесения наличности')
+    elif event == PaymentCallbackEvents.FillNote:
+        print(f'Событие: Принята банкнота в режим внесения наличности [{kwargs["amount_note"]}]')
     elif event == PaymentCallbackEvents.ExitFillingMode:
-        pass
+        print(f'Событие: Выход устройства из режима внесения наличности')
+    elif event == PaymentCallbackEvents.CashboxRemoved:
+        print(f'Событие: Кассета извлечена')
+    elif event == PaymentCallbackEvents.CashboxReplaced:
+        print(f'Событие: Кассета вставлена')
 
-    # on_payment                    // принята банкнота
-    # on_payment_complete           // сумма принята полностью, сдача выдана (в случае необходимости)
 
-    # on_payout_error               // ошибка выдачи сдачи
-    # on_payout_complete            // вся запрошенная сумма выдана
+        # Init = 0  # инициализация купюроприемник
+        # PayoutError = 3  # ошибка выдачи сдачи
+        # PayoutRequest = 4  # запрошена выдача сдачи
+        # CancelError = 6  # ошибка отмены операции
+        # EnterServiceMode = 16  # вход в сервисный режим (функциональная карта #1)
+        # ExitServiceMode = 17  # выход из сервисного режима (функциональная карта #2)
+        # UpdatePayoutInfo = 18  # обновление информации по заполнению хоппера
+        # UpdateCashboxInfo = 19  # обновление информации по заполнению кассеты
+        # WaitScreen = 20  # вывести экран ожидания завершения операции
+        # CurrentScreen = 21  # вывести экран с текущим состоянием
+        # PrintPayStationReport = 24  # печать отчета
+        # BanknoteLow = 25  # минимальное показания по банкноте
 
-    # on_cancel_error               // ошибка отмены операции
-    # on_cancel_complete            // операция отмены произведена успешна
+        # PayoutAlarm = 26  # хоппер почти заполнен (более 90%)
+        # PayoutFull = 27  # хоппер полностью заполнен
+        # CashboxAlarm = 28  # кассета почти заполнена (более 90%)
+        # CashboxFull = 29  # кассета полностью заполнена
+        #
+        # RestoreSessionData = 32  # восстановление состояния сессии после выключения питания
+        # ResetSessionData = 33  # удаление данных предыдущей сессии
+        # SaveSessionData = 34  # сохранение данных текущей сессии
     pass
 
 
 def main():
-    global printer
-
     logging.basicConfig(level=logging.DEBUG)
 
-    # create printer object
-    # printer = CustomPrinter(serial_port='COM2', event_callback=printer_on_event)
-    # printer.start()
-    # time.sleep(1)
-
-    # create recycler object
+    # create a recycler object
     payout = SmartPayout(serial_port=itl_dev_port, address=0, event_callback=smartpayout_on_event)
     payout.start()
     time.sleep(1)
@@ -2527,8 +2553,8 @@ def main():
             print('commands:                                            functional cards:           tests:')
             print(' r - report              s - serial number            1 - Out of service          8 - test')
             print(' e - enable              f - firmware version         2 - In service              9 - smart float')
-            print(' d - disable             a - amount request           5 - Fill hoppers            0 - report state')
-            print(' p - pay                 c - cancel request           6 - Empty hoppers')
+            print(' d - disable             a - amount request 100       5 - Fill hoppers            0 - report state')
+            print(' p - pay 50              c - cancel request           6 - Empty hoppers')
             print(' b - build revision      x - exit')
             print('---------------------------------------------------------------------------------------------------')
 
@@ -2541,7 +2567,7 @@ def main():
                 payout.sspDisableValidator()
             if cmd == 'p':
                 # payout.sspPayout(400, SSP_DEFAULT_CURRENCY)
-                payout.PayoutRequest(150)
+                payout.PayoutRequest(50)
             if cmd == 'x':
                 break
             if cmd == 's':
@@ -2555,7 +2581,7 @@ def main():
                 print(f'Build revision: device: {dev_type}, device version: {dev_ver}, payout version: {pay_ver}')
 
             if cmd == 'a':
-                payout.PaymentRequest(50)
+                payout.PaymentRequest(100)
             if cmd == 'c':
                 payout.CancelRequest()
 

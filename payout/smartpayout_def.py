@@ -1,20 +1,27 @@
-#!/usr/bin/python3
-import datetime
-import sys
-import random
-from dataclasses import dataclass
 from enum import IntEnum, EnumMeta
+from random import randint
+from datetime import datetime, timedelta
+from dataclasses import dataclass
+from platform import system
 
-if 'posix' in sys.builtin_module_names:
-    itl_dev_port = '/dev/ttyACM1'
-    itl_codec_id = 'utf-8'
-    itl_payment_state_file = r'/mnt/status/payment_state.dat'
-    itl_device_state_file = r'/mnt/status/device_state.dat'
-elif 'nt' in sys.builtin_module_names:
+current_platform = system()
+if current_platform == 'Windows':
     itl_dev_port = 'COM3'
     itl_codec_id = 'cp1251'
     itl_payment_state_file = r'payment_state.dat'
     itl_device_state_file = r'device_state.dat'
+elif current_platform == 'Linux':
+    itl_dev_port = '/dev/ttyACM1'
+    itl_codec_id = 'utf-8'
+    itl_payment_state_file = r'/mnt/status/payment_state.dat'
+    itl_device_state_file = r'/mnt/status/device_state.dat'
+elif current_platform == 'Darwin':
+    itl_dev_port = '/dev/tty.usbmodem14201'
+    itl_codec_id = 'utf-8'
+    itl_payment_state_file = r'/tmp/status/payment_state.dat'
+    itl_device_state_file = r'/tmp/status/device_state.dat'
+
+
 
 # Transport Layer
 # Data and commands are transported between the host and the slave(s) using a
@@ -25,12 +32,13 @@ elif 'nt' in sys.builtin_module_names:
 # STX          - Single byte indicating the start of a message - 0x7F hex
 # SEQ/Slave ID - Bit 7 is the sequence flag of the packet, bits 6-0 represent the address of the slave the
 #                packet is intended for, the highest allowable slave ID is 0x7D
-# LENGTH       - The length of the data included in the packet - this does not include STX, the CRC or the Slave ID
+# LENGTH       - The length of the data included in the packet - this does not include STX, the CRC or the SLAVE ID
 # Slave ID     - Single byte used to identify the address of the slave the packet is intended for
 # DATA         - Commands and data to be transferred
 # CRCL,        - Low and high byte of a forward CRC-16 algorithm using the Polynomial (X16 + X15 + X2
-# CRCH         - +1) calculated on all bytes, except STX. It is initialised using the seed 0xFFFF. The CRC is
-#                calculated before byte stuffing.
+# CRCH         - +1) calculated on all bytes, except STX.
+#                It is initialized using the seed 0xFFFF.
+#                The CRC is calculated before byte stuffing.
 
 # Max protocol version supported by SMART Payout (3/11/11).
 SSP_MAX_PROTOCOL_VERSION = 8
@@ -41,7 +49,8 @@ SSP_CRC_POLY = 0x8005
 MAX_PRIME_NUMBER = 0x80000000
 SSP_DEFAULT_KEY = 0x0123456701234567
 # Каналы устройства и номиналы хранящихся банкнот {номер канала: номинал банкноты}
-SSP_DEFAULT_CHANNEL_VALUES = {0: 0, 1: 10, 2: 50, 3: 100, 4: 200, 5: 500, 6: 1000, 7: 2000, 8: 5000}
+# SSP_DEFAULT_CHANNEL_VALUES = {0: 0, 1: 10, 2: 50, 3: 100, 4: 200, 5: 500, 6: 1000, 7: 2000, 8: 5000}
+SSP_DEFAULT_CHANNEL_VALUES = {0: 0, 1: 10, 2: 50, 3: 100, 4: 500, 5: 1000, 6: 5000}
 # Номиналы банкнот хранящихся в хоппере
 SSP_DEFAULT_PAYOUT_LIMIT = (50, 100, 500, 1000)
 # Максимальное количество банкнот в хоппере
@@ -75,17 +84,12 @@ class MyEnumMeta(EnumMeta):
             return True
 
 
-class PayoutError(BaseException):
-    def __init__(self, message):
-        super().__init__(message)
-
-
-class PayoutNotInitializedError(PayoutError):
+class PayoutNotInitializedError(Exception):
     def __init__(self):
         super().__init__('Payout is not initialized!')
 
 
-class PayoutCommunicationError(PayoutError):
+class PayoutCommunicationError(Exception):
     def __init__(self):
         super().__init__('Communication to payout is broken!')
 
@@ -544,6 +548,7 @@ class ChannelCashboxItem:
     """
     def __init__(self, channel_id: int):
         self.count = 0
+        self.channel_id = channel_id
 
 
 class SSPChannel:
@@ -562,7 +567,7 @@ class DeviceState:
         self.is_change_payout = False
         self.is_change_cashbox = True
         self.is_need_smartfloat = False
-        self.alarm_last_time = datetime.datetime.now() - datetime.timedelta(seconds=SSP_ALARM_TIMEOUT)
+        self.alarm_last_time = datetime.now() - timedelta(seconds=SSP_ALARM_TIMEOUT)
 
     def get_cashbox_info(self) -> dict:
         cashbox_info = {}
@@ -605,43 +610,20 @@ class DeviceState:
         return counter
 
 
-def IsItPrime(n: int, a: int) -> bool:
-    d = XpowYmodN(a, n - 1, n)
+def is_it_prime(n: int, a: int) -> bool:
+    d = xpow_ymod_n(a, n - 1, n)
     return d == 1
 
 
-def MillerRabin(n: int, trials: int):
+def miller_rabin(n: int, trials: int):
     for i in range(trials):
-        a = random.randint(2, n)
-        if not IsItPrime(n, a):
+        a = randint(2, n)
+        if not is_it_prime(n, a):
             return False
     return True
 
 
-def miller_rabin(n: int, k: int = 5) -> bool:
-    if n <= 1:
-        return False
-    if n <= 3:
-        return True
-    r, s = 0, n - 1
-    while s % 2 == 0:
-        r += 1
-        s //= 2
-    for _ in range(k):
-        a = random.randint(2, n - 1)
-        x = pow(a, s, n)
-        if x == 1 or x == n - 1:
-            continue
-        for _ in range(r - 1):
-            x = pow(x, 2, n)
-            if x == n - 1:
-                break
-            else:
-                return False
-        return True
-
-
-def isPrime2(n: int):
+def is_prime2(n: int):
     if n == 2 or n == 3:
         return True
     if n % 2 == 0 or n < 2:
@@ -652,31 +634,26 @@ def isPrime2(n: int):
     return True
 
 
-def GeneratePrime(max_number: int) -> int:
+def generate_prime(max_number: int) -> int:
     """
-    Generates a large prime number by
-    choosing a randomly large integer, and ensuring the value is odd
-    then uses the miller-rabin primality test on it to see if it is prime
+    Generates a large prime number by choosing a randomly large integer.
+    Ensuring the value is odd, then use the miller-rabin primality test on it to see if it is prime
     if not the value gets increased until it is prime
     """
 
-    tmp = random.randint(0, max_number)
+    tmp = randint(0, max_number)
     # ensure it is an odd number
     if not (tmp % 2):
         tmp += 1
 
-    # # test for prime
-    # if miller_rabin(tmp, 5):
-    #     return tmp
-
     # increment until prime
-    while not MillerRabin(tmp, 5):
+    while not miller_rabin(tmp, 5):
         # increment until prime
         tmp += 2
     return tmp
 
 
-def XpowYmodN(x: int, y: int, n: int) -> int:
+def xpow_ymod_n(x: int, y: int, n: int) -> int:
     """
     Raises X to the power Y in modulus N
     the values of X, Y, and N can be massive, and this can be
@@ -686,15 +663,3 @@ def XpowYmodN(x: int, y: int, n: int) -> int:
 
     res = pow(x, y, n)
     return res
-
-    # res = 1
-    # oneShift63 = 1 << 63
-    # if y == 1:
-    #     return x & n
-    #
-    # for i in range(64):
-    #     y <<= 1
-    #     res = res * res // n
-    #     if y & oneShift63:
-    #         res = res * x % n
-    # return res
