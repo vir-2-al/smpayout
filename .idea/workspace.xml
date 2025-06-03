@@ -5,9 +5,23 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="4024799e-a9b0-4776-8582-90c460cba74a" name="Changes" comment="refactor">
-      <change afterPath="$PROJECT_DIR$/requirements.txt" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.gitignore" beforeDir="false" afterPath="$PROJECT_DIR$/.gitignore" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/remark.txt" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/smpayout/__init__.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/smpayout/cfg.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/smpayout/device.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/smpayout/device_def.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/smpayout/exceptions.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/smpayout/helpers.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/misc.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/misc.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/smpayout.iml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/smpayout.iml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/cfg.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/inc/utils.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/payout/aes128.py" beforeDir="false" afterPath="$PROJECT_DIR$/smpayout/aes128.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/payout/smartpayout.py" beforeDir="false" afterPath="$PROJECT_DIR$/smpayout/smartpayout.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/payout/smartpayout_def.py" beforeDir="false" afterPath="$PROJECT_DIR$/smpayout/smartpayout_def.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/requirements.txt" beforeDir="false" afterPath="$PROJECT_DIR$/requirements.txt" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -50,20 +64,29 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent"><![CDATA[{
-  "keyToString": {
-    "Python.main.executor": "Run",
-    "Python.smartpayout.executor": "Run",
-    "Python.smartpayout_def.executor": "Debug",
-    "RunOnceActivity.ShowReadmeOnStart": "true",
-    "RunOnceActivity.git.unshallow": "true",
-    "git-widget-placeholder": "main"
+  <component name="PropertiesComponent">{
+  &quot;keyToString&quot;: {
+    &quot;Python.aes128.executor&quot;: &quot;Run&quot;,
+    &quot;Python.app.executor&quot;: &quot;Run&quot;,
+    &quot;Python.helpers.executor&quot;: &quot;Run&quot;,
+    &quot;Python.main.executor&quot;: &quot;Run&quot;,
+    &quot;Python.smartpayout.executor&quot;: &quot;Run&quot;,
+    &quot;Python.smartpayout_def.executor&quot;: &quot;Run&quot;,
+    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
+    &quot;git-widget-placeholder&quot;: &quot;main&quot;,
+    &quot;settings.editor.selected.configurable&quot;: &quot;preferences.pluginManager&quot;
   }
-}]]></component>
+}</component>
+  <component name="RecentsManager">
+    <key name="MoveFile.RECENT_KEYS">
+      <recent name="$PROJECT_DIR$/payout" />
+    </key>
+  </component>
   <component name="SharedIndexes">
     <attachedChunks>
       <set>
-        <option value="bundled-python-sdk-2ee2454479a3-9cdd278e9d02-com.jetbrains.pycharm.community.sharedIndexes.bundled-PC-251.25410.122" />
+        <option value="bundled-python-sdk-dfff61a61320-9cdd278e9d02-com.jetbrains.pycharm.community.sharedIndexes.bundled-PC-251.25410.159" />
       </set>
     </attachedChunks>
   </component>
@@ -124,7 +147,15 @@
       <option name="project" value="LOCAL" />
       <updated>1746971783079</updated>
     </task>
-    <option name="localTasksCounter" value="7" />
+    <task id="LOCAL-00007" summary="refactor">
+      <option name="closed" value="true" />
+      <created>1746972278035</created>
+      <option name="number" value="00007" />
+      <option name="presentableId" value="LOCAL-00007" />
+      <option name="project" value="LOCAL" />
+      <updated>1746972278035</updated>
+    </task>
+    <option name="localTasksCounter" value="8" />
     <servers />
   </component>
   <component name="VcsManagerConfiguration">
