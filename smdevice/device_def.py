@@ -1,6 +1,6 @@
 from enum import IntEnum
 
-from .helpers import MyEnumMeta
+from smdevice.helpers import MyEnumMeta
 
 
 # Standard BNV SSP Commands
@@ -323,7 +323,7 @@ class SSPKeys:
 
 
 class SSPState(IntEnum, metaclass=MyEnumMeta):
-    disconnected = 0x01      # нет связи с устройством
+    disconnected = 0x01     # нет связи с устройством
     cashbox_removed = 0x02  # вытащен ящик с деньгами
     note_path_open = 0x03   # открыт отсек с приемом банкнот
     error_page = 0x04       # отображено сообщение об ошибке

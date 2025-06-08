@@ -1,15 +1,12 @@
 import inspect
 import logging
-import time
 from platform import system
 
-from setuptools.command.develop import develop
+# from setuptools.command.develop import develop
 
-from smpayout.cfg import PAYOUT_MODULE_NAME, SSP_DEFAULT_CURRENCY
-from smpayout.device_def import SSPResponse
-from smpayout.smartpayout import SmartPayout
+from smdevice.cfg import PAYOUT_MODULE_NAME, SSP_DEFAULT_CURRENCY
+# from smpayout.smartpayout import SmartPayout
 from smpayout.smartpayout_def import PaymentCallbackEvents
-from smpayout.device import Device
 
 
 current_platform = system()
@@ -22,6 +19,7 @@ elif current_platform == 'Linux':
 elif current_platform == 'Darwin':
     itl_dev_port = '/dev/tty.usbmodem14201'
     itl_codec_id = 'utf-8'
+
 def smartpayout_on_event(*, event, **kwargs):
 
     logger = logging.getLogger(PAYOUT_MODULE_NAME + __name__ + '.' + inspect.stack()[0][3])
@@ -90,7 +88,7 @@ def smartpayout_on_event(*, event, **kwargs):
     pass
 
 
-# def test_smpayout():
+# def sample():
 #     logging.basicConfig(level=logging.DEBUG)
 #
 #     # create a recycler object
@@ -171,35 +169,6 @@ def smartpayout_on_event(*, event, **kwargs):
 #     payout.terminate()
 #     print('Exit program')
 
-def test_device():
-    # Создание объекта устройства
-    device = Device(port=itl_dev_port)
-    # Подключение к устройству, установление шифрованного канала связи и инициализация
-    device.connect()
-    # Выдача банкноты
-    device.sspPayout(100, SSP_DEFAULT_CURRENCY)
-
-    # Запрос количества 100 рублевых банкнот
-    res, counter = device.sspGetNoteAmount(100, SSP_DEFAULT_CURRENCY)
-
-    # Включение приема банкнот
-    device.sspEnablePayout()
-    device.sspEnableValidator()
-
-    # Мониторинг состояния устройства
-    # Переодически запрашиваем состояние устройства device.sspPoll()
-    # см. smpayout/smartpayout.py -> poll_device
-
-    # Выключение приема банкнот
-    device.sspDisableValidator()
-    device.sspDisablePayout()
-
-    # Сброс банкнот в хоппере
-    # device.sspEmpty()
-
-    # Отключение устройства
-    device.disconnect()
 
 if __name__ == "__main__":
-    # test_smpayout()
-    test_device()
+    sample()

@@ -6,15 +6,13 @@ import queue
 import threading
 import time
 from datetime import datetime, timedelta
-from random import randint
 from sys import builtin_module_names
-from typing import Union, Callable, NoReturn, Tuple, Dict, Any
+from typing import Callable, NoReturn
 from pathlib import Path
 
 import serial
 
-from . import aes128
-from .helpers import get_serial_ports, crc_ccitt_16, flatlist, thread_sleep, generate_prime, xpow_ymod_n
+from smdevice.helpers import get_serial_ports, thread_sleep
 from .smartpayout_def import (
     SSPResponse, SSP_DEFAULT_CURRENCY, SSP_SCALE_FACTOR, SSPKeys, SSPState, SSP_MAX_PROTOCOL_VERSION,
     SSP_CRC_SEED, SSP_CRC_POLY, SSP_STEX, SSP_STX, SSP_DEFAULT_CHANNEL_VALUES, SSP_MAX_PAYOUT_CAPACITY,
@@ -23,7 +21,7 @@ from .smartpayout_def import (
     DeviceState, PaymentState, PollEvents, PaymentMode, ReportType, PageType, ReportTypeTitle, PayoutCmd,
     RouteModes, SSPRejectReason, EncryptedCmd, GenericCmd, BNVCmd, PayoutNotInitializedError, PaymentCallbackEvents,
     PAYOUT_MODULE_NAME)
-from .device import Device
+from smdevice.device import Device
 
 
 class SmartPayout(threading.Thread):
@@ -1495,7 +1493,8 @@ class SmartPayout(threading.Thread):
 
                     # try an open device
                     if not self._device_port:
-                        self.open_device()
+                        if self.open_device():
+                            self.ReadPayoutChannelsInfo()
 
                     # check device_out_of_service
                     if SSPState.error_page not in self._state:
@@ -1694,26 +1693,10 @@ class SmartPayout(threading.Thread):
     def SetGlobalServiceMode(self, flag: bool):
         self._global_service_mode = flag
 
-    def SetupRequest(self) -> bool:
-        res = self.sspSetupRequest()
-        if res != SSPResponse.ok:
-           return False
-        return True
-
     def UpdateCounterRequest(self):
         self._device.is_change_payout = True
         self._device.is_change_cashbox = True
 
-    def SetNotesRoute(self) -> bool:
-        logger = logging.getLogger(PAYOUT_MODULE_NAME + __name__ + '.' + inspect.stack()[0][3])
-        for _, amount in SSP_DEFAULT_CHANNEL_VALUES.items():
-            if amount > 0:
-                res = self.sspSetNoteRoute(RouteModes.payouts, amount, SSP_DEFAULT_CURRENCY)
-                if res != SSPResponse.ok:
-                    logger.error(
-                        f'SmartPayout.SetNotesRoute: Can''t set note route for {amount} {SSP_DEFAULT_CURRENCY} ...')
-                    return False
-        return True
 
     def EnablePayment(self) -> bool:
         logger = logging.getLogger(PAYOUT_MODULE_NAME + __name__ + '.' + inspect.stack()[0][3])

@@ -1,4 +1,3 @@
-import inspect
 import logging
 import os
 import time
@@ -6,9 +5,16 @@ from random import randint
 from typing import Union, Tuple, Dict, Any
 import serial
 
-from . import aes128
-from .helpers import crc_ccitt_16, flatlist, generate_prime, xpow_ymod_n
-from .cfg import (
+from smdevice import aes128
+from smdevice.helpers import (
+    crc_ccitt_16,
+    flatlist,
+    generate_prime,
+    xpow_ymod_n,
+    get_channels_mask
+)
+
+from smdevice.cfg import (
     SSP_DEFAULT_CURRENCY,
     SSP_SCALE_FACTOR,
     SSP_MAX_PROTOCOL_VERSION,
@@ -17,17 +23,12 @@ from .cfg import (
     SSP_STEX,
     SSP_STX,
     SSP_DEFAULT_CHANNEL_VALUES,
-    SSP_MAX_PAYOUT_CAPACITY,
-    SSP_FLOAT_TIMEOUT,
+    SSP_DEFAULT_ACCEPT_LIMIT,
     SSP_FLOAT_AMOUNT,
-    SSP_LIMIT_PAYOUT_CAPACITY,
-    SSP_MAX_CASHBOX_CAPACITY,
-    SSP_LIMIT_CASHBOX_CAPACITY,
     SSP_DEFAULT_KEY,
-    MAX_PRIME_NUMBER,
-    PAYOUT_MODULE_NAME
+    MAX_PRIME_NUMBER
 )
-from .device_def import (
+from smdevice.device_def import (
     SSPResponse,
     SSPKeys,
     SSPState,
@@ -38,11 +39,11 @@ from .device_def import (
     GenericCmd,
     BNVCmd
 )
-from .exceptions import (
-    PayoutNotInitializedError,
-    PayoutCommunicationError
+from smdevice.exceptions import (
+    PayoutNotInitializedError
 )
 
+logger = logging.getLogger()
 
 class Device:
 
@@ -64,7 +65,6 @@ class Device:
         :param address: - адрес устройства (от 0 до 255)
         """
         super().__init__()
-        logger = logging.getLogger(PAYOUT_MODULE_NAME + __name__ + '.' + inspect.stack()[0][3])
         port_name = os.path.basename(port)
         logger.info(f'Device.init: {port_name}')
         self._serial_port = port
@@ -167,7 +167,6 @@ class Device:
         :return: Tuple containing the response code and any data returned by the device.
         """
 
-        logger = logging.getLogger(PAYOUT_MODULE_NAME + __name__ + '.' + inspect.stack()[0][3])
         try:
             read_header = self._device_port.read(size=3)
             if not isinstance(read_header, bytes) or len(read_header) < 3:
@@ -279,6 +278,16 @@ class Device:
         self.encrypted = True
         return True
 
+    def SetNotesRoute(self) -> bool:
+        for _, amount in SSP_DEFAULT_CHANNEL_VALUES.items():
+            if amount > 0:
+                res = self.sspSetNoteRoute(RouteModes.payouts, amount, SSP_DEFAULT_CURRENCY)
+                if res != SSPResponse.ok:
+                    logger.error(
+                        f'SmartPayout.SetNotesRoute: Can''t set note route for {amount} {SSP_DEFAULT_CURRENCY} ...')
+                    return False
+        return True
+
     def init_device(self) -> bool:
         """
         Initializes the SmartPayout device.
@@ -293,7 +302,6 @@ class Device:
         :return: True if initialization is successful, False otherwise.
         """
 
-        logger = logging.getLogger(PAYOUT_MODULE_NAME + __name__ + '.' + inspect.stack()[0][3])
         logger.info('SmartPayout.device_init: initializing ...')
 
         # Negotiate keys for encryption
@@ -314,7 +322,7 @@ class Device:
             return False
 
         # Set inhibits
-        mask = self._device.get_channels_mask()
+        mask = get_channels_mask(SSP_DEFAULT_ACCEPT_LIMIT)
         res = self.sspSetInhibits(mask)
         if res != SSPResponse.ok:
             logger.error('SmartPayout.device_init: Failed on setting inhibits...')
@@ -329,7 +337,6 @@ class Device:
         # Route all notes to payout
         self.SetNotesRoute()
 
-        self.ReadPayoutChannelsInfo()
         self._state.add(SSPState.error_page)
         logger.info('SmartPayout.device_init: Init complete')
         return True
@@ -344,7 +351,6 @@ class Device:
         return True
 
     def connect(self) -> bool:
-        logger = logging.getLogger(PAYOUT_MODULE_NAME + __name__ + '.' + inspect.stack()[0][3])
         logger.info(f'SmartPayout.open_device: try open device [{self._serial_port}]')
         if self._device_port:
             self.disconnect()
@@ -382,7 +388,6 @@ class Device:
         :return: None
         """
 
-        logger = logging.getLogger(PAYOUT_MODULE_NAME + __name__ + '.' + inspect.stack()[0][3])
         # logger.info('SmartPayout.close_device')
         if self._device_port:
             try:
@@ -444,9 +449,7 @@ class Device:
                            The CRC is calculated before byte stuffing.
         """
 
-        # logger = logging.getLogger(APP_NAME + __name__ + '.' + inspect.stack()[0][3])
         # logger.info(f'SmartPayout.exec_command: data: {data}')
-        logger = logging.getLogger(PAYOUT_MODULE_NAME + __name__ + '.' + inspect.stack()[0][3])
         if self._device_port:
             data = flatlist(data)
             byte_list = [[ord(x) for x in i] if isinstance(i, str) else [i] for i in data]
@@ -482,7 +485,6 @@ class Device:
         0xFF in binary indicating all channels in this register are able to accept notes.
         """
 
-        logger = logging.getLogger(PAYOUT_MODULE_NAME + __name__ + '.' + inspect.stack()[0][3])
         logger.info(f'SmartPayout.sspSetInhibits')
         channels_low = mask_channels & 0xFF  # channels 1..8   (10, 50, 100, 200, 500, 1000, 2000, 5000)
         channels_high = (mask_channels >> 8) & 0xFF  # channels 9..16  ()
@@ -496,7 +498,6 @@ class Device:
         :return: - SSPResponse.ok if the command was successful, otherwise an error response.
         """
 
-        logger = logging.getLogger(PAYOUT_MODULE_NAME + __name__ + '.' + inspect.stack()[0][3])
         logger.info(f'SmartPayout.sspSync')
         self._seq = 0x80
         return self.exec_command([GenericCmd.sync])[0]
@@ -507,7 +508,6 @@ class Device:
         this needs to check the response to make sure the version is supported.
         """
 
-        logger = logging.getLogger(PAYOUT_MODULE_NAME + __name__ + '.' + inspect.stack()[0][3])
         logger.info(f'SmartPayout.sspSetProtocolVersion')
         return self.exec_command([GenericCmd.host_protocol, version])[0]
 
@@ -518,7 +518,6 @@ class Device:
         of channels in the dataset.
         """
 
-        logger = logging.getLogger(PAYOUT_MODULE_NAME + __name__ + '.' + inspect.stack()[0][3])
         logger.info(f'SmartPayout.sspSetupRequest')
         res, data = self.exec_command([GenericCmd.setup_request])
         return res
@@ -528,7 +527,6 @@ class Device:
         Enables the payout facility of the validator which lets it store and payout notes.
         """
 
-        logger = logging.getLogger(PAYOUT_MODULE_NAME + __name__ + '.' + inspect.stack()[0][3])
         logger.info(f'SmartPayout.sspEnablePayout')
         res = self.exec_command([PayoutCmd.enable])[0]
         self._state.discard(SSPState.disabled)
@@ -539,7 +537,6 @@ class Device:
         Stops the validator from being able to store or payout notes.
         """
 
-        logger = logging.getLogger(PAYOUT_MODULE_NAME + __name__ + '.' + inspect.stack()[0][3])
         logger.info(f'SmartPayout.sspDisablePayout')
         return self.exec_command([PayoutCmd.disable])[0]
 
@@ -548,7 +545,6 @@ class Device:
         The enable command allows the validator to act on commands sent to it.
         """
 
-        logger = logging.getLogger(PAYOUT_MODULE_NAME + __name__ + '.' + inspect.stack()[0][3])
         logger.info(f'SmartPayout.sspEnableValidator')
         return self.exec_command([GenericCmd.enable])[0]
 
@@ -557,7 +553,6 @@ class Device:
         Disable command stops the validator acting on commands sent to it.
         """
 
-        logger = logging.getLogger(PAYOUT_MODULE_NAME + __name__ + '.' + inspect.stack()[0][3])
         logger.info(f'SmartPayout.sspDisableValidator')
         rc, _ = self.exec_command([GenericCmd.disable])
         time.sleep(0.5)
@@ -568,7 +563,6 @@ class Device:
         The reset command instructs the validator to restart
         """
 
-        logger = logging.getLogger(PAYOUT_MODULE_NAME + __name__ + '.' + inspect.stack()[0][3])
         logger.info(f'SmartPayout.sspResetValidator')
         return self.exec_command([GenericCmd.reset])[0]
 
@@ -579,7 +573,6 @@ class Device:
         :return: - SSPResponse, int - The response from the command and the minimum payout amount in the default currency.
         """
 
-        logger = logging.getLogger(PAYOUT_MODULE_NAME + __name__ + '.' + inspect.stack()[0][3])
         res, data = self.exec_command([PayoutCmd.get_minimum_payout])
         logger.info(f'SmartPayout.sspGetMinimumPayout  data: {data}')
         if isinstance(data, bytes):
@@ -598,7 +591,6 @@ class Device:
         :return: - SSPResponse.ok if the command was successful, otherwise an error response.
         """
 
-        logger = logging.getLogger(PAYOUT_MODULE_NAME + __name__ + '.' + inspect.stack()[0][3])
         logger.info(f'SmartPayout.sspFloatAmount')
         res, data = self.exec_command([PayoutCmd.float_amount,
                                        (0 * SSP_SCALE_FACTOR).to_bytes(4, 'little'),
@@ -617,7 +609,6 @@ class Device:
         :return: - SSPResponse.ok if the command was successful, otherwise an error response.
         """
 
-        logger = logging.getLogger(PAYOUT_MODULE_NAME + __name__ + '.' + inspect.stack()[0][3])
         logger.info(f'SmartPayout.sspFloatByDenomination')
         params = b''
         banknote_count = len(payout_amount)
@@ -637,7 +628,6 @@ class Device:
         The SMART Hopper will not keep track of what coins have been emptied.
         """
 
-        logger = logging.getLogger(PAYOUT_MODULE_NAME + __name__ + '.' + inspect.stack()[0][3])
         logger.info(f'SmartPayout.sspEmpty')
         return self.exec_command([PayoutCmd.empty])[0]
 
@@ -650,24 +640,20 @@ class Device:
         :return - SSPResponse.ok if the command was successful, otherwise an error response.
         """
 
-        logger = logging.getLogger(PAYOUT_MODULE_NAME + __name__ + '.' + inspect.stack()[0][3])
         logger.info(f'SmartPayout.sspSmartEmpty')
         return self.exec_command([PayoutCmd.smart_empty])[0]
 
     def sspSetGenerator(self, value: int) -> SSPResponse:
-        logger = logging.getLogger(PAYOUT_MODULE_NAME + __name__ + '.' + inspect.stack()[0][3])
         logger.info(f'SmartPayout.sspSetGenerator')
         res = self.exec_command([EncryptedCmd.set_generator, value.to_bytes(8, 'little')])[0]
         return res
 
     def sspSetModulus(self, value: int) -> SSPResponse:
-        logger = logging.getLogger(PAYOUT_MODULE_NAME + __name__ + '.' + inspect.stack()[0][3])
         logger.info(f'SmartPayout.sspSetModulus')
         res = self.exec_command([EncryptedCmd.set_modulus, value.to_bytes(8, 'little')])[0]
         return res
 
     def sspKeyExchange(self, value: int) -> (SSPResponse, int):
-        logger = logging.getLogger(PAYOUT_MODULE_NAME + __name__ + '.' + inspect.stack()[0][3])
         logger.info(f'SmartPayout.sspKeyExchange')
         res, data = self.exec_command([EncryptedCmd.key_exchange, value.to_bytes(8, 'little')])
         key = None
@@ -682,7 +668,6 @@ class Device:
         :return: - SSPResponse, int - The response from the command and the serial number.
         """
 
-        logger = logging.getLogger(PAYOUT_MODULE_NAME + __name__ + '.' + inspect.stack()[0][3])
         logger.info(f'SmartPayout.sspGetSerialNumber')
         res, data = self.exec_command([GenericCmd.get_serial_number])
         sn = 0
@@ -697,7 +682,6 @@ class Device:
         :return: - SSPResponse, str - The response from the command and the firmware version string.
         """
 
-        logger = logging.getLogger(PAYOUT_MODULE_NAME + __name__ + '.' + inspect.stack()[0][3])
         logger.info(f'SmartPayout.sspGetFirmwareVersion')
         res, data = self.exec_command([GenericCmd.get_firmware_version])
         ver = ''
@@ -712,7 +696,6 @@ class Device:
         :return: - SSPResponse, int, int, int - The response from the command, device type, device version, and payout version.
         """
 
-        logger = logging.getLogger(PAYOUT_MODULE_NAME + __name__ + '.' + inspect.stack()[0][3])
         logger.info(f'SmartPayout.sspGetBuildRevision')
         res, data = self.exec_command([GenericCmd.get_build_revision])
         device_type = 0
@@ -729,7 +712,6 @@ class Device:
         Gets the number of notes stored and reports them in a string which is passed as a parameter.
         """
 
-        logger = logging.getLogger(PAYOUT_MODULE_NAME + __name__ + '.' + inspect.stack()[0][3])
         logger.info(f'SmartPayout.sspGetNoteAmount')
         res, data = self.exec_command([PayoutCmd.get_note_amount,
                                        (amount * SSP_SCALE_FACTOR).to_bytes(4, 'little'),
@@ -748,7 +730,6 @@ class Device:
         Return dict {amount: counter, amount: counter, ...}
         """
 
-        logger = logging.getLogger(PAYOUT_MODULE_NAME + __name__ + '.' + inspect.stack()[0][3])
         logger.info(f'SmartPayout.sspGetCashboxPayoutOpData')
         res, data = self.exec_command([PayoutCmd.cashbox_payout_op_data])
         notes_info = None
@@ -775,7 +756,6 @@ class Device:
         :return: SSPResponse - The response from the payout command.
         """
 
-        logger = logging.getLogger(PAYOUT_MODULE_NAME + __name__ + '.' + inspect.stack()[0][3])
         # for i in range(3):
         while True:
             logger.info(f'SmartPayout.sspPayout: try payout amount: {value}')
@@ -820,7 +800,6 @@ class Device:
         :return: SSPResponse - The response from the payout command.
         """
 
-        logger = logging.getLogger(PAYOUT_MODULE_NAME + __name__ + '.' + inspect.stack()[0][3])
         banknotes_count = len(banknotes)
         if banknotes_count:
             logger.info(f'SmartPayout.sspPayoutByDenomination: try payout amount: {banknotes}')
@@ -869,7 +848,6 @@ class Device:
         returned as a single byte.
         """
 
-        logger = logging.getLogger(PAYOUT_MODULE_NAME + __name__ + '.' + inspect.stack()[0][3])
         logger.info(f'SmartPayout.sspQueryRejection')
         res, data = self.exec_command([BNVCmd.last_reject])
         reject_code = None
@@ -886,7 +864,6 @@ class Device:
         this data can be retrieved using the CASHBOX PAYOUT OPERATION DATA command.
         """
 
-        # logger = logging.getLogger(APP_NAME + __name__ + '.' + inspect.stack()[0][3])
         # logger.info(f'SmartPayout.sspPoll')
         res, data = self.exec_command([GenericCmd.poll])
         return res, data
@@ -898,7 +875,6 @@ class Device:
         this data can be retrieved using the CASHBOX PAYOUT OPERATION DATA command.
         """
 
-        logger = logging.getLogger(PAYOUT_MODULE_NAME + __name__ + '.' + inspect.stack()[0][3])
         logger.info(f'SmartPayout.sspHold')
         res, data = self.exec_command([BNVCmd.hold])
         return res
@@ -911,7 +887,6 @@ class Device:
             0x01 as the second byte indicates that the selected note should be routed to the cashbox,
         """
 
-        logger = logging.getLogger(PAYOUT_MODULE_NAME + __name__ + '.' + inspect.stack()[0][3])
         logger.info(f'SmartPayout.sspSetNoteRoute')
         res = self.exec_command(
             [PayoutCmd.set_route, route, (value * SSP_SCALE_FACTOR).to_bytes(4, 'little'), currency.upper()])[0]

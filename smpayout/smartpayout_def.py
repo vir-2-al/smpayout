@@ -2,14 +2,14 @@ from enum import IntEnum
 from datetime import datetime, timedelta
 from dataclasses import dataclass
 
-from .cfg import (
+from smdevice.cfg import (
     SSP_MAX_PAYOUT_CAPACITY,
     SSP_DEFAULT_CHANNEL_VALUES,
     SSP_DEFAULT_PAYOUT_LIMIT,
     SSP_DEFAULT_CURRENCY,
     SSP_ALARM_TIMEOUT
 )
-from .helpers import MyEnumMeta
+from smdevice.helpers import MyEnumMeta
 
 class PaymentMode(IntEnum, metaclass=MyEnumMeta):
     error = 0x00            # не установлен режим / ошибка связи

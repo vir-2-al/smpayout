@@ -4,24 +4,15 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="4024799e-a9b0-4776-8582-90c460cba74a" name="Changes" comment="refactor">
-      <change afterPath="$PROJECT_DIR$/app.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/remark.txt" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/smpayout/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/smpayout/cfg.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/smpayout/device.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/smpayout/device_def.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/smpayout/exceptions.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/smpayout/helpers.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/misc.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/misc.xml" afterDir="false" />
+    <list default="true" id="4024799e-a9b0-4776-8582-90c460cba74a" name="Changes" comment="* device class">
       <change beforePath="$PROJECT_DIR$/.idea/smpayout.iml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/smpayout.iml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/cfg.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/inc/utils.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/payout/aes128.py" beforeDir="false" afterPath="$PROJECT_DIR$/smpayout/aes128.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/payout/smartpayout.py" beforeDir="false" afterPath="$PROJECT_DIR$/smpayout/smartpayout.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/payout/smartpayout_def.py" beforeDir="false" afterPath="$PROJECT_DIR$/smpayout/smartpayout_def.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/requirements.txt" beforeDir="false" afterPath="$PROJECT_DIR$/requirements.txt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app.py" beforeDir="false" afterPath="$PROJECT_DIR$/app.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/smpayout/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/smpayout/__init__.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/smpayout/cfg.py" beforeDir="false" afterPath="$PROJECT_DIR$/smpayout/cfg.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/smpayout/device.py" beforeDir="false" afterPath="$PROJECT_DIR$/smpayout/device.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/smpayout/helpers.py" beforeDir="false" afterPath="$PROJECT_DIR$/smpayout/helpers.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/smpayout/smartpayout.py" beforeDir="false" afterPath="$PROJECT_DIR$/smpayout/smartpayout.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -36,6 +27,11 @@
     </option>
   </component>
   <component name="Git.Settings">
+    <option name="RECENT_BRANCH_BY_REPOSITORY">
+      <map>
+        <entry key="$PROJECT_DIR$" value="main" />
+      </map>
+    </option>
     <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
   </component>
   <component name="GitHubPullRequestSearchHistory">{
@@ -64,22 +60,23 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent">{
-  &quot;keyToString&quot;: {
-    &quot;Python.aes128.executor&quot;: &quot;Run&quot;,
-    &quot;Python.app.executor&quot;: &quot;Run&quot;,
-    &quot;Python.helpers.executor&quot;: &quot;Run&quot;,
-    &quot;Python.main.executor&quot;: &quot;Run&quot;,
-    &quot;Python.smartpayout.executor&quot;: &quot;Run&quot;,
-    &quot;Python.smartpayout_def.executor&quot;: &quot;Run&quot;,
-    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
-    &quot;git-widget-placeholder&quot;: &quot;main&quot;,
-    &quot;settings.editor.selected.configurable&quot;: &quot;preferences.pluginManager&quot;
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "Python.aes128.executor": "Run",
+    "Python.app.executor": "Debug",
+    "Python.helpers.executor": "Run",
+    "Python.main.executor": "Run",
+    "Python.smartpayout.executor": "Run",
+    "Python.smartpayout_def.executor": "Run",
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "RunOnceActivity.git.unshallow": "true",
+    "git-widget-placeholder": "device",
+    "settings.editor.selected.configurable": "preferences.pluginManager"
   }
-}</component>
+}]]></component>
   <component name="RecentsManager">
     <key name="MoveFile.RECENT_KEYS">
+      <recent name="$PROJECT_DIR$/.venv" />
       <recent name="$PROJECT_DIR$/payout" />
     </key>
   </component>
@@ -155,12 +152,58 @@
       <option name="project" value="LOCAL" />
       <updated>1746972278035</updated>
     </task>
-    <option name="localTasksCounter" value="8" />
+    <task id="LOCAL-00008" summary="* device class">
+      <option name="closed" value="true" />
+      <created>1748982250876</created>
+      <option name="number" value="00008" />
+      <option name="presentableId" value="LOCAL-00008" />
+      <option name="project" value="LOCAL" />
+      <updated>1748982250876</updated>
+    </task>
+    <task id="LOCAL-00009" summary="* device class">
+      <option name="closed" value="true" />
+      <created>1748982365765</created>
+      <option name="number" value="00009" />
+      <option name="presentableId" value="LOCAL-00009" />
+      <option name="project" value="LOCAL" />
+      <updated>1748982365765</updated>
+    </task>
+    <task id="LOCAL-00010" summary="* device class">
+      <option name="closed" value="true" />
+      <created>1748982451511</created>
+      <option name="number" value="00010" />
+      <option name="presentableId" value="LOCAL-00010" />
+      <option name="project" value="LOCAL" />
+      <updated>1748982451511</updated>
+    </task>
+    <option name="localTasksCounter" value="11" />
     <servers />
   </component>
   <component name="VcsManagerConfiguration">
     <MESSAGE value="add" />
     <MESSAGE value="refactor" />
-    <option name="LAST_COMMIT_MESSAGE" value="refactor" />
+    <MESSAGE value="* device class" />
+    <option name="LAST_COMMIT_MESSAGE" value="* device class" />
+  </component>
+  <component name="XDebuggerManager">
+    <breakpoint-manager>
+      <breakpoints>
+        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
+          <url>file://$PROJECT_DIR$/smpayout/cfg.py</url>
+          <line>1</line>
+          <option name="timeStamp" value="5" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
+          <url>file://$PROJECT_DIR$/smpayout/helpers.py</url>
+          <line>252</line>
+          <option name="timeStamp" value="22" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
+          <url>file://$PROJECT_DIR$/app.py</url>
+          <line>176</line>
+          <option name="timeStamp" value="23" />
+        </line-breakpoint>
+      </breakpoints>
+    </breakpoint-manager>
   </component>
 </project>

@@ -3,10 +3,10 @@ from serial import Serial, SerialException
 from sys import platform
 from glob import glob
 from time import time, sleep
-from typing import Any
+from typing import Any, Tuple
 from random import randint
 
-from cfg import (
+from smdevice.cfg import (
     SSP_SCALE_FACTOR,
     SSP_DEFAULT_CHANNEL_VALUES
 )
@@ -230,8 +230,28 @@ def get_int_int_str(data: bytes, idx: int) -> (list, int):
     return dispensed, requested, currency, num_bytes
 
 
-def get_channel_no(amount: int) -> int:
+def get_channel_no(banknote_nominal: int) -> int:
+    """
+    Returns the channel number for a given banknote nominal.
+    :param banknote_nominal: banknote nominal value
+    :return: channel number (1-6) or 0 if not found
+    """
+
     for k, v in SSP_DEFAULT_CHANNEL_VALUES.items():
-        if v == amount:
+        if v == banknote_nominal:
             return k
     return 0
+
+
+def get_channels_mask(banknotes: Tuple[int]) -> int:
+    """
+    Returns a bitmask of the payout channels that are enabled by default.
+    :return: bit mask of enabled payout channels
+    """
+
+    mask = 0x00
+    for banknote_nominal in banknotes:
+        channel_no = get_channel_no(banknote_nominal)
+        if channel_no:
+            mask |= (1 << (channel_no - 1))
+    return mask
