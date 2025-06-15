@@ -1,8 +1,0 @@
-[project]
-name = "smpayout"
-version = "0.1.0"
-description = ""
-requires-python = ">=3.7"
-dependencies = [
-    "pyserial==3.5",
-]
