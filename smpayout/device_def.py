@@ -1,6 +1,6 @@
 from enum import IntEnum
 
-from smdevice.helpers import MyEnumMeta
+from smpayout.helpers import MyEnumMeta
 
 
 # Standard BNV SSP Commands

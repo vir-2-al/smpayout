@@ -5,8 +5,8 @@ from random import randint
 from typing import Union, Tuple, Dict, Any, Callable
 import serial
 
-from smdevice import aes128
-from smdevice.helpers import (
+from smpayout import aes128
+from smpayout.helpers import (
     crc_ccitt_16,
     flatlist,
     generate_prime,
@@ -17,7 +17,7 @@ from smdevice.helpers import (
     get_int_int_str
 )
 
-from smdevice.cfg import (
+from smpayout.cfg import (
     SSP_DEFAULT_CURRENCY,
     SSP_SCALE_FACTOR,
     SSP_MAX_PROTOCOL_VERSION,
@@ -32,7 +32,7 @@ from smdevice.cfg import (
     MAX_PRIME_NUMBER
 )
 
-from smdevice.device_def import (
+from smpayout.device_def import (
     SSPResponse,
     SSPKeys,
     SSPState,
@@ -46,7 +46,7 @@ from smdevice.device_def import (
     DeviceCallbackEvents
 )
 
-from smdevice.exceptions import (
+from smpayout.exceptions import (
     PayoutNotInitializedError
 )
 

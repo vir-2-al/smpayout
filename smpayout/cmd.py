@@ -5,10 +5,10 @@ from platform import system
 from threading import Thread
 from typing import Union, Optional
 
-from smdevice.cfg import (SSP_DEFAULT_CURRENCY,
+from smpayout.cfg import (SSP_DEFAULT_CURRENCY,
                           SSP_DEFAULT_ACCEPT_LIMIT)
-from smdevice.device import Device
-from smdevice.device_def import SSPResponse, DeviceCallbackEvents
+from smpayout.device import Device
+from smpayout.device_def import SSPResponse, DeviceCallbackEvents
 
 logging.basicConfig(level=logging.CRITICAL)
 logger = logging.getLogger()

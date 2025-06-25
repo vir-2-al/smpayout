@@ -6,7 +6,7 @@ from time import time, sleep
 from typing import Any, Tuple
 from random import randint
 
-from smdevice.cfg import (
+from smpayout.cfg import (
     SSP_SCALE_FACTOR,
     SSP_DEFAULT_CHANNEL_VALUES
 )

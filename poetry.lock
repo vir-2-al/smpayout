@@ -17,5 +17,5 @@ cp2110 = ["hidapi"]
 
 [metadata]
 lock-version = "2.1"
-python-versions = ">=3.7"
-content-hash = "2c009a5281cb9c7fcd50f21c4a523bf5747ef297e43eb251127051f731d120fa"
+python-versions = ">=3.9"
+content-hash = "f0fcd4e5c4e630fc68c333c886df74a2610943e933e6218c0edee291adaab41f"
