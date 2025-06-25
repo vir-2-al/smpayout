@@ -50,7 +50,8 @@ from smdevice.exceptions import (
     PayoutNotInitializedError
 )
 
-logger = logging.getLogger()
+logger = logging.getLogger(__name__)
+
 
 def events_callback_stub(event: DeviceCallbackEvents, *args, **kwargs) -> None:
     pass
@@ -95,7 +96,6 @@ class Device:
         self._event_callback = event_callback or events_callback_stub
         self._last_banknote = None
         self._dispensing_amount = None
-
 
     def encrypt_packet(self, data: Any) -> Any:
         """
@@ -1515,5 +1515,3 @@ class Device:
                 continue
 
         return res
-
-

@@ -10,24 +10,18 @@ from smdevice.cfg import (SSP_DEFAULT_CURRENCY,
 from smdevice.device import Device
 from smdevice.device_def import SSPResponse, DeviceCallbackEvents
 
-
 logging.basicConfig(level=logging.CRITICAL)
 logger = logging.getLogger()
-
 is_app_exit = False
-itl_dev_port = None
+
 current_platform = system()
 if current_platform == 'Windows':
-    itl_dev_port = 'COM3'
     itl_codec_id = 'cp1251'
 elif current_platform == 'Linux':
-    itl_dev_port = '/dev/ttyACM1'
     itl_codec_id = 'utf-8'
 elif current_platform == 'Darwin':
-    itl_dev_port = '/dev/tty.usbmodem14201'
     itl_codec_id = 'utf-8'
 
-device : Union[Device, None] = None
 
 def device_events_callback(event: DeviceCallbackEvents, *args, **kwargs):
     print(f'Событие: {event.name}, параметры: {args}   {kwargs}')
@@ -43,6 +37,7 @@ def get_number(string_number: str) -> Optional[int]:
 
 
 def worker(dev: Device):
+    global is_app_exit
     while not is_app_exit:
         try:
             if not dev.connected():
@@ -62,16 +57,15 @@ def worker(dev: Device):
     dev.disconnect()
 
 
-def sample():
-    global device, is_app_exit
-
+def run():
+    itl_dev_port = input("Порт: ")
     print(f'Используемый порт: {itl_dev_port}')
     # Создание объекта устройства
-    device = Device(event_callback=device_events_callback,  port=itl_dev_port)
+    device = Device(event_callback=device_events_callback, port=itl_dev_port)
+    global is_app_exit
 
     thread = Thread(target=worker, args=(device,))
     thread.start()
-
     while not is_app_exit:
         try:
             print(f'Введите:')
@@ -115,7 +109,7 @@ def sample():
                     # Запрос количества банкнот для сдачи
                     res, counter = device.sspGetNoteAmount(banknote_nominal, SSP_DEFAULT_CURRENCY)
                     if res == SSPResponse.ok:
-                       print(f'Количество банкнот {banknote_nominal} {SSP_DEFAULT_CURRENCY}: {counter}')
+                        print(f'Количество банкнот {banknote_nominal} {SSP_DEFAULT_CURRENCY}: {counter}')
                 # Запрос информации о последней операции перемещения банкнот в кассету
                 res, note_info = device.sspGetCashboxPayoutOpData()
                 if res == SSPResponse.ok:
@@ -130,6 +124,7 @@ def sample():
 
     thread.join()
 
+
 if __name__ == "__main__":
     # test_smpayout()
-    sample()
+    run()
