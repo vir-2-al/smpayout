@@ -6,7 +6,7 @@ authors = [
     {name = "pysashapy",email = "sasha.2000ubr@gmail.com"}
 ]
 readme = "README.md"
-requires-python = ">=3.7"
+requires-python = ">=3.9"
 dependencies = [
     "pyserial (>=3.5,<4.0)"
 ]
