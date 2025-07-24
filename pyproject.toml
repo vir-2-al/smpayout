@@ -1,6 +1,6 @@
 [project]
 name = "smpayout"
-version = "0.1.0"
+version = "0.1.1"
 description = ""
 authors = [
     {name = "pysashapy",email = "sasha.2000ubr@gmail.com"}
