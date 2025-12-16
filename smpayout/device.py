@@ -775,11 +775,14 @@ class Device:
 
         # for i in range(3):
         logger.info(f'Device.sspPayout: try payout amount: {value}')
-        res, data = self.exec_command(
-            [PayoutCmd.payout_amount, (value * SSP_SCALE_FACTOR).to_bytes(4, 'little'), currency[:3],
-             SSP_FLOAT_AMOUNT])
-        if res == SSPResponse.ok:
-            return res
+        try:
+            res, data = self.exec_command(
+                [PayoutCmd.payout_amount, (value * SSP_SCALE_FACTOR).to_bytes(4, 'little'), currency[:3],
+                 SSP_FLOAT_AMOUNT])
+            if res == SSPResponse.ok:
+                return res
+        except PayoutNotInitializedError:
+            return 0xFF
 
         error_code = 0xFF
         if isinstance(data, bytes):
