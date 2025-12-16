@@ -126,5 +126,4 @@ def run():
 
 
 if __name__ == "__main__":
-    # test_smpayout()
     run()

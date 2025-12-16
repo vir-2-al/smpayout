@@ -801,6 +801,7 @@ class Device:
 
             logger.error(f'Device.sspPayout: msg: {error_msg}, code: {error_code}')
             if error_code != 0x03:
+                return error_code
                 break
             time.sleep(0.5)
         logger.info(f'Device.sspPayout: result: {res}')
