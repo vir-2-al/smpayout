@@ -782,7 +782,7 @@ class Device:
             if res == SSPResponse.ok:
                 return res
         except PayoutNotInitializedError:
-            return 0xFF
+            return 0x03
 
         error_code = 0xFF
         if isinstance(data, bytes):
