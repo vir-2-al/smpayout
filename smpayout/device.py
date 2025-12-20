@@ -760,6 +760,52 @@ class Device:
                 notes_info[amount] = num_moved
         return res, notes_info
 
+    # def sspPayout(self, value: int, currency: str) -> SSPResponse:
+    #     """
+    #     Variable byte command that instructs the payout device to payout a specified amount.
+    #     The developer can specify whether the payout is a “real” payout or a “test” payout.
+    #     This can be useful as it allows the developer to find out whether a payout could be
+    #     made without actually making the payout.
+    #     This is done using an additional byte at the end of the standard data.
+    #
+    #     :param value: - Amount to payout
+    #     :param currency: - 3-letter currency code (ISO 4217)
+    #     :return: SSPResponse - The response from the payout command.
+    #     """
+    #
+    #     # for i in range(3):
+    #     logger.info(f'Device.sspPayout: try payout amount: {value}')
+    #     try:
+    #         res, data = self.exec_command(
+    #             [PayoutCmd.payout_amount, (value * SSP_SCALE_FACTOR).to_bytes(4, 'little'), currency[:3],
+    #              SSP_FLOAT_AMOUNT])
+    #         if res == SSPResponse.ok:
+    #             return res
+    #     except PayoutNotInitializedError:
+    #         return 0x03
+    #
+    #     error_code = 0xFF
+    #     if isinstance(data, bytes):
+    #         error_code = data[0]
+    #         if error_code == 0x00:
+    #             error_msg = 'Not enough value in device'
+    #         elif error_code == 0x01:
+    #             error_msg = 'Cannot pay exact amount'
+    #         elif error_code == 0x02:
+    #             error_msg = 'Note float empty'
+    #         elif error_code == 0x03:
+    #             error_msg = 'Device busy'
+    #         elif error_code == 0x04:
+    #             error_msg = 'Device disabled'
+    #         else:
+    #             error_msg = 'Payout unknow error code'
+    #     else:
+    #         error_msg = 'Unknow payour error'
+    #
+    #     logger.error(f'Device.sspPayout: msg: {error_msg}, code: {error_code}')
+    #     return error_code
+
+
     def sspPayout(self, value: int, currency: str) -> SSPResponse:
         """
         Variable byte command that instructs the payout device to payout a specified amount.
@@ -775,36 +821,40 @@ class Device:
 
         # for i in range(3):
         logger.info(f'Device.sspPayout: try payout amount: {value}')
-        try:
+        try_counter = 0
+        device_wait_limit = 10   # seconds
+        res = SSPResponse.timeout
+        while try_counter < device_wait_limit:
             res, data = self.exec_command(
                 [PayoutCmd.payout_amount, (value * SSP_SCALE_FACTOR).to_bytes(4, 'little'), currency[:3],
                  SSP_FLOAT_AMOUNT])
             if res == SSPResponse.ok:
-                return res
-        except PayoutNotInitializedError:
-            return 0x03
+                break
 
-        error_code = 0xFF
-        if isinstance(data, bytes):
-            error_code = data[0]
-            if error_code == 0x00:
-                error_msg = 'Not enough value in device'
-            elif error_code == 0x01:
-                error_msg = 'Cannot pay exact amount'
-            elif error_code == 0x02:
-                error_msg = 'Note float empty'
-            elif error_code == 0x03:
-                error_msg = 'Device busy'
-            elif error_code == 0x04:
-                error_msg = 'Device disabled'
+            error_code = 0xFF
+            if isinstance(data, bytes):
+                error_code = data[0]
+                if error_code == 0x00:
+                    error_msg = 'Not enough value in device'
+                elif error_code == 0x01:
+                    error_msg = 'Cannot pay exact amount'
+                elif error_code == 0x02:
+                    error_msg = 'Note float empty'
+                elif error_code == 0x03:
+                    error_msg = 'Device busy'
+                elif error_code == 0x04:
+                    error_msg = 'Device disabled'
+                else:
+                    error_msg = 'Payout unknow error code'
             else:
-                error_msg = 'Payout unknow error code'
-        else:
-            error_msg = 'Unknow payour error'
+                error_msg = 'Unknow payout error'
 
-        logger.error(f'Device.sspPayout: msg: {error_msg}, code: {error_code}')
-        return error_code
-
+            logger.error(f'Device.sspPayout: msg: {error_msg}, code: {error_code}')
+            if error_code != 0x03:
+                break
+            time.sleep(1.0)
+            try_counter += 1
+        return res
 
     def sspPayoutByDenomination(self, banknotes: Dict[int, int]) -> SSPResponse:  # banknotes = {50: 1, 100: 1, ...}
         """
