@@ -854,6 +854,7 @@ class Device:
                 break
             time.sleep(1.0)
             try_counter += 1
+
         return res
 
     def sspPayoutByDenomination(self, banknotes: Dict[int, int]) -> SSPResponse:  # banknotes = {50: 1, 100: 1, ...}
