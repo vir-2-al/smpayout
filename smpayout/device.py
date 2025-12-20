@@ -1,5 +1,6 @@
 import logging
 import os
+import threading
 import time
 from random import randint
 from typing import Union, Tuple, Dict, Any, Callable
@@ -96,6 +97,7 @@ class Device:
         self._event_callback = event_callback or events_callback_stub
         self._last_banknote = None
         self._dispensing_amount = None
+        self._lock = threading.Lock()
 
     def encrypt_packet(self, data: Any) -> Any:
         """
@@ -467,32 +469,36 @@ class Device:
         """
 
         # logger.info(f'Device.exec_command: data: {data}')
-        if self._device_port:
-            data = flatlist(data)
-            byte_list = [[ord(x) for x in i] if isinstance(i, str) else [i] for i in data]
-            payload_data = bytes([int(item) for sublist in byte_list for item in sublist])
-            if self.encrypted:
-                payload_data = self.encrypt_packet(payload_data)
-                if not payload_data:
-                    return SSPResponse.failure, None
+        self._lock.acquire()
+        try:
+            if self._device_port:
+                data = flatlist(data)
+                byte_list = [[ord(x) for x in i] if isinstance(i, str) else [i] for i in data]
+                payload_data = bytes([int(item) for sublist in byte_list for item in sublist])
+                if self.encrypted:
+                    payload_data = self.encrypt_packet(payload_data)
+                    if not payload_data:
+                        return SSPResponse.failure, None
 
-            arr = bytearray([self._address ^ self._seq, len(payload_data)]) + payload_data
-            crc = crc_ccitt_16(arr, SSP_CRC_SEED, SSP_CRC_POLY)
-            full_command = arr + crc.to_bytes(2, byteorder='little')
-            # byte stuffing <STX>
-            full_command = b'\x7F' + bytes(flatlist([b if b != SSP_STX else b'\x7F\x7F' for b in full_command]))
-            # logger.info(f'send: dev: [{self.device_port.name}] data: {printer_data}')
-            try:
-                self._device_port.write(full_command)
-                self._device_port.flush()
-                return self.check_response()
-            except (IOError, TypeError, Exception) as se:
-                logger.error(f'exec_command: error: {se}')
-                self.disconnect()
-                return SSPResponse.failure, None
-        else:
-            logger.error(f'exec_command: error: PayoutNotInitializedError')
-            raise PayoutNotInitializedError()
+                arr = bytearray([self._address ^ self._seq, len(payload_data)]) + payload_data
+                crc = crc_ccitt_16(arr, SSP_CRC_SEED, SSP_CRC_POLY)
+                full_command = arr + crc.to_bytes(2, byteorder='little')
+                # byte stuffing <STX>
+                full_command = b'\x7F' + bytes(flatlist([b if b != SSP_STX else b'\x7F\x7F' for b in full_command]))
+                # logger.info(f'send: dev: [{self.device_port.name}] data: {printer_data}')
+                try:
+                    self._device_port.write(full_command)
+                    self._device_port.flush()
+                    return self.check_response()
+                except (IOError, TypeError, Exception) as se:
+                    logger.error(f'exec_command: error: {se}')
+                    self.disconnect()
+                    return SSPResponse.failure, None
+            else:
+                logger.error(f'exec_command: error: PayoutNotInitializedError')
+                raise PayoutNotInitializedError()
+        finally:
+            self._lock.release()
 
     def sspSetInhibits(self, mask_channels: int = 0xFFFF) -> SSPResponse:
         """
